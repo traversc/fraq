@@ -1,0 +1,31 @@
+%%{init: {
+    'theme': 'default',
+    'themeVariables': {'fontSize': '24px', 'padding': 4}
+}}%%
+graph LR
+    START(( ))
+    style START fill:transparent,stroke:transparent;
+    subgraph Readers
+    direction TB
+    R0[Primary]
+    R1[Secondary]
+    J((Join))
+    R0 --> J
+    R1 --> J
+    end
+    style Readers fill:#ffffff,stroke:#4a4a4a,color:#1f2933,font-size:22px
+    classDef ioNode fill:#cfdcff,stroke:#244c9a,color:#0f275a
+    classDef schedNode fill:#f7f9ff,stroke:#3a6bbd,color:#1d3562
+    classDef process fill:#d9f5e3,stroke:#1b6b34,color:#0d3e1c,font-weight:bold
+    START ~~~ L
+    L(Limiter) --> R0
+    J --> P{Process<br>kernel}
+    class P process
+    P --> S(Reorder)
+    S --> D(Demux)
+    D -->|FASTQ| FQW[FASTQ<br>writers]
+    D -->|.fraq/.mem| FRC[Fraq<br>compressor]
+    D -.-> L
+    FRC --> FRW[Fraq<br>writers]
+    class L,J,S,D schedNode
+    class R0,R1,FQW,FRC,FRW ioNode

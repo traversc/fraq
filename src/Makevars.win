@@ -1,0 +1,13 @@
+PKG_CPPFLAGS = -DRCPP_USE_UNWIND_PROTECT -DRCPP_NO_RTTI -DRCPP_NO_SUGAR -I../inst/include -I. -IZSTD
+PKG_CXXFLAGS = -DRCPP_PARALLEL_USE_TBB=1 $(shell "${R_HOME}/bin${R_ARCH_BIN}/Rscript.exe" -e "RcppParallel::CxxFlags()")
+PKG_LIBS = -L. -lQSZSTD -lz $(shell ${R_HOME}/bin${R_ARCH_BIN}/Rscript.exe -e "RcppParallel::RcppParallelLibs()")
+
+LIBZSTD = ZSTD/zstd.o
+
+$(SHLIB): libQSZSTD.a
+
+libQSZSTD.a: $(LIBZSTD)
+	$(AR) rcs libQSZSTD.a $(LIBZSTD)
+
+clean:
+	rm -f $(SHLIB) $(OBJECTS) $(LIBZSTD) libQSZSTD.a

@@ -1,0 +1,40 @@
+Package: fraq
+Type: Package
+Title: A High-Throughput and Extensible Toolkit for Processing FASTQ Data
+Version: 0.1.1
+Date: 2025-11-12
+Authors@R: c(
+    person("Travers", "Ching", email = "traversc@gmail.com", role = c("aut", "cre", "cph"),
+        comment = c(ORCID = "0000-0002-5577-3516")),
+    person("Yann", "Collet", role = c("ctb", "cph"),
+        comment = "Author of the bundled zstd library"),
+    person("Facebook, Inc.", role = "cph",
+        comment = "Copyright holder of the bundled zstd code"),
+    person("Reichardt", "Tino", role = c("ctb", "cph"),
+        comment = "Contributor/copyright holder of bundled zstd code"),
+    person("Skibinski", "Przemyslaw", role = c("ctb", "cph"),
+        comment = "Contributor/copyright holder of bundled zstd code"),
+    person("Mori", "Yuta", role = c("ctb", "cph"),
+        comment = "Contributor/copyright holder of bundled zstd code"))
+Maintainer: Travers Ching <traversc@gmail.com>
+Description: High-throughput extensible toolkit for processing FASTQ data. 
+    Builds on Intel TBB’s flow graph to orchestrate concurrent I/O and data
+    processing, throughput can be as fast as compression and disk
+    speed allows. The package ships with a suite of predefined ‘kernels’ for common FASTQ
+    tasks, and its extension system lets you drop in custom kernels so you can
+    cover almost any FASTQ processing workflow without giving up performance.
+License: GPL-3
+biocViews: Software, Infrastructure, Sequencing, DNASeq, QualityControl, Alignment
+URL: https://github.com/traversc/fraq
+BugReports: https://github.com/traversc/fraq/issues
+Depends: R (>= 4.5.0)
+Imports: 
+    Rcpp, ShortRead, Biostrings, RcppParallel, edlibR, stringfish
+LinkingTo: Rcpp, RcppParallel, edlibR
+Suggests: knitr, rmarkdown, BiocStyle, processx
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+VignetteBuilder: knitr
+SystemRequirements: GNU make
+Copyright: This package includes code from the 'zstd' library created by Yann Collet and owned by Facebook, Inc.
