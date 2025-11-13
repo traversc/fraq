@@ -487,12 +487,16 @@ fraq_trim_adapters <- function(
 #' \item \code{per_base_content_R{1,2}}: long format base usage by position 
 #' (A/C/G/T/N/other).
 #' \item \code{length_distribution_R{1,2}}: histogram of sequence lengths.
+#' \item \code{avg_read_quality_R{1,2}}: histogram of rounded per-read average
+#' quality (columns \code{avg_quality}, \code{count}).
 #' }
 #' For paired-end inputs, \code{insert_size} is included when overlaps are 
 #' found.
 #'
 #' @return A named list of data frames. For single-end: R1-only tables. For 
-#' paired-end: R1/R2 tables plus optional \code{insert_size}.
+#' paired-end: R1/R2 tables plus optional \code{insert_size}. Each mate includes
+#' \code{basic_stats}, per-base quality/content, length distributions, and
+#' average read quality histograms.
 #'
 #' @examples
 #' # Single-end example

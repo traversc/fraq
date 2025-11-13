@@ -730,6 +730,7 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
         std::vector<uint64_t> qcnt;
         std::vector<std::unordered_map<char, uint64_t>> base;
         std::unordered_map<int, uint64_t> length_hist;
+        std::unordered_map<int, uint64_t> avg_quality_hist;
         uint64_t total_reads = 0;
         uint64_t total_bases = 0;
         uint64_t total_gc = 0;
@@ -754,6 +755,7 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
             total_bases += L;
 
             size_t gc_here = 0;
+            uint64_t read_q_sum = 0;
             ensure_size(L);
 
             for (size_t i = 0; i < L; ++i) {
@@ -767,10 +769,15 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
                 if (q < 0) q = 0;
                 qsum[i] += static_cast<uint64_t>(q);
                 qcnt[i] += 1;
+                read_q_sum += static_cast<uint64_t>(q);
             }
             total_gc += gc_here;
 
             length_hist[static_cast<int>(L)] += 1;
+
+            double avg_quality = static_cast<double>(read_q_sum) / static_cast<double>(L);
+            int avg_bin = static_cast<int>(std::llround(avg_quality));
+            avg_quality_hist[avg_bin] += 1;
         }
     };
 
@@ -836,6 +843,7 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
             out.total_reads += A.total_reads;
             out.total_bases += A.total_bases;
             out.total_gc += A.total_gc;
+            for (const auto &kv : A.avg_quality_hist) out.avg_quality_hist[kv.first] += kv.second;
         }
         return out;
     };
@@ -939,17 +947,34 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
         );
     };
 
+    auto make_avg_quality_df = [](const Accum &A) -> Rcpp::DataFrame {
+        Rcpp::IntegerVector avg(A.avg_quality_hist.size());
+        Rcpp::NumericVector cnt(A.avg_quality_hist.size());
+        int i = 0;
+        for (const auto &kv : A.avg_quality_hist) {
+            avg[i] = kv.first;
+            cnt[i] = static_cast<double>(kv.second);
+            ++i;
+        }
+        return Rcpp::DataFrame::create(
+            Rcpp::Named("avg_quality") = avg,
+            Rcpp::Named("count") = cnt
+        );
+    };
+
     Rcpp::List out;
     out["basic_stats_R1"] = make_basic_df(A1);
     out["per_base_quality_R1"] = make_quality_df(A1);
     out["per_base_content_R1"] = make_base_df_long(A1);
     out["length_distribution_R1"] = make_length_df(A1);
+    out["avg_read_quality_R1"] = make_avg_quality_df(A1);
 
     if (input.size() == 2) {
         out["basic_stats_R2"] = make_basic_df(A2);
         out["per_base_quality_R2"] = make_quality_df(A2);
         out["per_base_content_R2"] = make_base_df_long(A2);
         out["length_distribution_R2"] = make_length_df(A2);
+        out["avg_read_quality_R2"] = make_avg_quality_df(A2);
 
         if (!insert_hist.empty()) {
             Rcpp::IntegerVector isize(insert_hist.size());
