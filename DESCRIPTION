@@ -16,7 +16,6 @@ Authors@R: c(
         comment = "Contributor/copyright holder of bundled zstd code"),
     person("Mori", "Yuta", role = c("ctb", "cph"),
         comment = "Contributor/copyright holder of bundled zstd code"))
-Maintainer: Travers Ching <traversc@gmail.com>
 Description: High-throughput extensible toolkit for processing FASTQ data. 
     Builds on Intel TBB’s flow graph to orchestrate concurrent I/O and data
     processing, throughput can be as fast as compression and disk
