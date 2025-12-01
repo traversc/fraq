@@ -9,6 +9,10 @@ rcpp_fraq_downsample <- function(input, output, amount, nthreads = 1L) {
     invisible(.Call(`_fraq_rcpp_fraq_downsample`, input, output, amount, nthreads))
 }
 
+rcpp_fraq_slice <- function(input, output, limit, select, nthreads = 1L) {
+    invisible(.Call(`_fraq_rcpp_fraq_slice`, input, output, limit, select, nthreads))
+}
+
 rcpp_fraq_convert <- function(input, output, nthreads = 1L) {
     invisible(.Call(`_fraq_rcpp_fraq_convert`, input, output, nthreads))
 }
@@ -41,8 +45,8 @@ rcpp_fraq_trim_adapters <- function(input, output, adapters, max_distance = 1L, 
     .Call(`_fraq_rcpp_fraq_trim_adapters`, input, output, adapters, max_distance, filter_untrimmed, nthreads)
 }
 
-rcpp_fraq_summary <- function(input, phred33 = TRUE, min_overlap = 12L, max_mismatch_rate = 0.10, nthreads = 1L) {
-    .Call(`_fraq_rcpp_fraq_summary`, input, phred33, min_overlap, max_mismatch_rate, nthreads)
+rcpp_fraq_summary <- function(input, phred33 = TRUE, min_overlap = 12L, max_mismatch_rate = 0.10, limit = 0L, nthreads = 1L) {
+    .Call(`_fraq_rcpp_fraq_summary`, input, phred33, min_overlap, max_mismatch_rate, limit, nthreads)
 }
 
 rcpp_fraq_align <- function(query, target, max_distance = 2147483647L, ambiguity_base = "", boundary = "contains", distance_metric = "lv") {

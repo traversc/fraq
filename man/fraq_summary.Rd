@@ -9,6 +9,7 @@ fraq_summary(
   phred33 = TRUE,
   min_overlap = 12L,
   max_mismatch_rate = 0.1,
+  limit = 0L,
   nthreads = 1L
 )
 }
@@ -24,6 +25,9 @@ second to R2).}
 
 \item{max_mismatch_rate}{Numeric between 0 and 1 (inclusive); maximum
 allowed mismatch rate within the overlapped region (paired-end only).}
+
+\item{limit}{Numeric cap on the number of read sets to process. Use \code{0} to
+process all available reads.}
 
 \item{nthreads}{Integer number of threads.}
 }

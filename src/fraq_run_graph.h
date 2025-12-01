@@ -36,8 +36,10 @@ using tbb::flow::limiter_node;
 // atomic min helper function
 template<typename T>
 inline void atomic_min(std::atomic<T>& a, T v) {
-    T old = a.load(std::memory_order_relaxed);
-    while (old > v && !a.compare_exchange_weak(old, v, std::memory_order_relaxed)) {}
+    T old = a.load(std::memory_order_acquire);
+    while (old > v && !a.compare_exchange_weak(old, v,
+                                               std::memory_order_acq_rel,
+                                               std::memory_order_acquire)) {}
 }
 
 struct Block {
@@ -283,6 +285,10 @@ struct FraqRunGraph {
       [this](const continue_msg&) { return this->fraqf_writer_node_body(); }
     )
     {
+    const size_t limit_block = (config.limit > 0)
+      ? ((config.limit - 1) / config.blocksize)
+      : std::numeric_limits<size_t>::max();
+    block_index_limit.store(limit_block, std::memory_order_release);
     // Initialize secondary reader nodes for reader_index = 1..N-1
     if (readers.size() > 1) {
       secondary_reader_nodes.reserve(readers.size() - 1);
@@ -454,8 +460,11 @@ struct FraqRunGraph {
     p->index = b.blocks[0]->index;
 
     for (size_t i = 0; i < nreads; ++i) {
-      std::vector<Read> input_reads = b.move_reads(i);
       const size_t id = p->index * config.blocksize + i;
+      if (config.limit > 0 && id >= config.limit) {
+        break;
+      }
+      std::vector<Read> input_reads = b.move_reads(i);
 
       // kernel returns vector<pair<fname, Read>>
       auto routed = process_kernel(input_reads, id);

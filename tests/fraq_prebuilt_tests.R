@@ -384,4 +384,65 @@ stopifnot(summary_pe$basic_stats_R2$total_sequences[1] == 2)
 insert_sizes <- summary_pe$insert_size
 stopifnot(is.null(insert_sizes) || any(insert_sizes$insert_size == 6))
 
+cat("Testing fraq_summary limit...\n")
+limit_records <- list(
+    list(name = "l1", seq = "ACGT", qual = "IIII"),
+    list(name = "l2", seq = "TGCA", qual = "HHHH"),
+    list(name = "l3", seq = "GGGG", qual = "JJJJ")
+)
+limit_in <- write_fastq(tempfile(fileext = ".fastq"), limit_records)
+limit_summary <- fraq_summary(limit_in, limit = 2L, nthreads = 1L)
+stopifnot(limit_summary$basic_stats_R1$total_sequences[1] == 2)
+
+cat("Testing fraq_slice limit and select...\n")
+slice_records <- list(
+    list(name = "s1", seq = "AAAA", qual = "IIII"),
+    list(name = "s2", seq = "CCCC", qual = "IIII"),
+    list(name = "s3", seq = "GGGG", qual = "IIII")
+)
+slice_in <- write_fastq(tempfile(fileext = ".fastq"), slice_records)
+slice_limit_out <- tempfile(fileext = ".fastq")
+fraq_slice(slice_in, slice_limit_out, limit = 2L, nthreads = 1L)
+slice_limit_read <- read_fastq_records(slice_limit_out)
+stopifnot(length(slice_limit_read) == 2L)
+stopifnot(identical(slice_limit_read[[1]]$name, "s1"))
+stopifnot(identical(slice_limit_read[[2]]$name, "s2"))
+
+slice_select_out <- tempfile(fileext = ".fastq")
+fraq_slice(slice_in, slice_select_out, select = c(0, 2), nthreads = 1L)
+slice_select_read <- read_fastq_records(slice_select_out)
+stopifnot(length(slice_select_read) == 2L)
+stopifnot(identical(slice_select_read[[1]]$name, "s1"))
+stopifnot(identical(slice_select_read[[2]]$name, "s3"))
+
+cat("Testing fraq_slice uneven inputs emit excess read warning...\n")
+uneven_r1 <- write_fastq(tempfile(fileext = ".fastq"), list(
+    list(name = "u1", seq = "AAA", qual = "III"),
+    list(name = "u2", seq = "CCC", qual = "III"),
+    list(name = "u3", seq = "GGG", qual = "III"),
+    list(name = "u4", seq = "TTT", qual = "III")
+))
+uneven_r2 <- write_fastq(tempfile(fileext = ".fastq"), list(
+    list(name = "u1", seq = "AAA", qual = "III"),
+    list(name = "u2", seq = "CCC", qual = "III")
+))
+uneven_out1 <- tempfile(fileext = ".fastq")
+uneven_out2 <- tempfile(fileext = ".fastq")
+msgs <- character()
+msg_con <- textConnection("msgs", "w")
+sink(msg_con, type = "message")
+fraq_slice(
+    c(uneven_r1, uneven_r2),
+    c(uneven_out1, uneven_out2),
+    limit = 3L,
+    nthreads = 1L
+)
+sink(type = "message")
+close(msg_con)
+stopifnot(any(grepl("excess reads", msgs)))
+uneven_reads1 <- read_fastq_records(uneven_out1)
+uneven_reads2 <- read_fastq_records(uneven_out2)
+stopifnot(length(uneven_reads1) == 2L)
+stopifnot(length(uneven_reads2) == 2L)
+
 cat("fraq kernel tests completed successfully\n")

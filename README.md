@@ -37,6 +37,8 @@ preprocessing steps:
 - `fraq_concat()` - glue multiple inputs together
 - `fraq_chunk()` - split streams into chunk-numbered files with a
   suffix-driven format
+- `fraq_slice()` - keep the first `limit` reads or select specific read
+  indices
 - `fraq_count_barcodes()` - tally barcode hits with optional
   reverse-complement handling
 - `fraq_demux()` - shard reads into files derived from a `{barcode}`

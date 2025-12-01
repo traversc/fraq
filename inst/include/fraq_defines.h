@@ -123,13 +123,15 @@ struct FraqRunConfig {
     int zstd_compress_level = 3;
     int gzip_compress_level = 6;
     bool serial_kernel = false; // use serial kernel or unlimited kernel
+    size_t limit = 0; // 0 means no limit
     FraqRunConfig() {}
-    FraqRunConfig(size_t blocksize, int fraq_compress_level, int zstd_compress_level, int gzip_compress_level, bool serial_kernel)
+    FraqRunConfig(size_t blocksize, int fraq_compress_level, int zstd_compress_level, int gzip_compress_level, bool serial_kernel, size_t limit = 0)
       : blocksize(blocksize),
         fraq_compress_level(fraq_compress_level),
         zstd_compress_level(zstd_compress_level),
         gzip_compress_level(gzip_compress_level),
-        serial_kernel(serial_kernel)
+        serial_kernel(serial_kernel),
+        limit(limit)
     {
         if (blocksize == 0 || blocksize > 65535L) {
             throw std::runtime_error("blocksize must be between 1 and 65535");

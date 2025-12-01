@@ -117,6 +117,60 @@ fraq_convert <- function(input, output, nthreads = 1L) {
     invisible(NULL)
 }
 
+#' Slice reads by index or limit
+#'
+#' @description Write a subset of reads from `input` to `output`, either the
+#' first `limit` reads or specific zero-based indices in `select`.
+#'
+#' @param input Character vector of source files/keys.
+#' @param output Character vector of destination files/keys, same length as
+#'   `input`.
+#' @param limit Numeric scalar; keep the first `limit` reads (per record index).
+#'   Defaults to `NULL`.
+#' @param select Numeric vector of zero-based indices to keep. Defaults to
+#'   `NULL`.
+#' @param nthreads Integer number of threads for reading/writing.
+#'
+#' @details Exactly one of `limit` or `select` must be supplied.
+#'
+#' @return Invisibly returns `NULL` after writing the selected reads.
+#' @examples
+#' src <- tempfile(fileext = ".fastq")
+#' generate_random_fastq(src, n_reads = 10, read_length = 50)
+#' dest <- tempfile(fileext = ".fastq")
+#' fraq_slice(src, dest, limit = 5)
+#' @export
+fraq_slice <- function(input, output, limit = NULL, select = NULL, nthreads = 1L) {
+    if (!is.null(limit) && !is.null(select)) {
+        stop("Specify only one of `limit` or `select`.")
+    }
+    if (is.null(limit) && is.null(select)) {
+        stop("Specify `limit` or `select`.")
+    }
+    if (!is.null(limit)) {
+        if (!is.numeric(limit) || length(limit) != 1L || is.na(limit)) {
+            stop("`limit` must be a single numeric value.")
+        }
+        if (limit < 0) {
+            stop("`limit` must be non-negative.")
+        }
+    }
+    if (!is.null(select)) {
+        if (!is.numeric(select) || any(is.na(select))) {
+            stop("`select` must be a numeric vector with no missing values.")
+        }
+        if (any(select < 0)) {
+            stop("`select` must contain non-negative indices.")
+        }
+    }
+    limit_val <- if (is.null(limit)) 0 else as.numeric(limit)
+    select_vec <- if (is.null(select)) numeric() else as.numeric(select)
+    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
+    output <- normalizePath(output, winslash = "/", mustWork = FALSE)
+    rcpp_fraq_slice(input, output, limit_val, select_vec, as.integer(nthreads))
+    invisible(NULL)
+}
+
 #' Chunk sequencing files into fixed-size batches
 #'
 #' @description Split input datasets into sequential chunks. Each chunk is 
@@ -135,11 +189,11 @@ fraq_convert <- function(input, output, nthreads = 1L) {
 #' @details
 #' The suffix mapping follows:
 #' \itemize{
-#' \item `"fastq"` → `.fastq`
-#' \item `"gz"` → `.fastq.gz`
-#' \item `"zst"` → `.fastq.zst`
-#' \item `"fraq"` → `.fraq`
-#' \item `"mem"` → `.mem`
+#' \item `"fastq"` -> `.fastq`
+#' \item `"gz"` -> `.fastq.gz`
+#' \item `"zst"` -> `.fastq.zst`
+#' \item `"fraq"` -> `.fraq`
+#' \item `"mem"` -> `.mem`
 #' }
 #' @return Invisibly returns `NULL` after writing all chunked outputs.
 #'
@@ -475,6 +529,8 @@ fraq_trim_adapters <- function(
 #' (paired-end only).
 #' @param max_mismatch_rate Numeric between 0 and 1 (inclusive); maximum 
 #' allowed mismatch rate within the overlapped region (paired-end only).
+#' @param limit Numeric cap on the number of read sets to process. Use `0` to
+#'   process all available reads.
 #' @param nthreads Integer number of threads.
 #'
 #' @details
@@ -524,6 +580,7 @@ fraq_summary <- function(
     phred33 = TRUE,
     min_overlap = 12L,
     max_mismatch_rate = 0.10,
+    limit = 0L,
     nthreads = 1L
 ) {
     if (!is.character(input) || length(input) < 1L || length(input) > 2L) {
@@ -539,6 +596,9 @@ fraq_summary <- function(
     ) {
         stop("max_mismatch_rate must be a number in [0,1]")
     }
+    if (!is.numeric(limit) || length(limit) != 1L || is.na(limit) || limit < 0) {
+        stop("limit must be a single non-negative number")
+    }
 
     input <- normalizePath(input, winslash = "/", mustWork = FALSE)
     rcpp_fraq_summary(
@@ -546,6 +606,7 @@ fraq_summary <- function(
         phred33,
         as.integer(min_overlap),
         as.numeric(max_mismatch_rate),
+        as.numeric(limit),
         as.integer(nthreads)
     )
 }

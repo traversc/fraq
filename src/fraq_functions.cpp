@@ -5,12 +5,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <unordered_set>
 #include <tbb/global_control.h>
 #include <tbb/enumerable_thread_specific.h>
 #include <Rcpp.h>
 
 using namespace Rcpp;
 using fraq::output_t; // std::vector<outpair_t>, outpair_t = std::pair<std::string /*output file*/, Read>
+using fraq::input_t; // std::vector<fraq::Read>
 using fraq::zip; // zip(vector<A>, vector<B>) -> vector<pair<A,B>>
 using fraq::ends_with;
 
@@ -21,6 +23,7 @@ int fraq_options(const std::string &option, const int value, const bool set);
 void fraq_export_functions(DllInfo *dll);
 int rcpp_fraq_options(const std::string &option, const int value, const bool set);
 void rcpp_fraq_downsample(std::vector<std::string> input, const std::vector<std::string> &output, const double amount, const int nthreads);
+void rcpp_fraq_slice(std::vector<std::string> input, const std::vector<std::string> &output, const double limit, const std::vector<double> &select, const int nthreads);
 void rcpp_fraq_convert(std::vector<std::string> input, const std::vector<std::string> &output, const int nthreads);
 void rcpp_fraq_chunk(std::vector<std::string> input, const std::vector<std::string> &output_prefix, const std::string &output_suffix, const double chunk_size, const int nthreads);
 void rcpp_fraq_concat(const std::vector<std::string> &input, const std::string &output, const int nthreads);
@@ -29,7 +32,7 @@ void rcpp_fraq_demux(const std::vector<std::string> &input, const std::vector<st
 Rcpp::List rcpp_fraq_merge_pairs(const std::vector<std::string> &input, const std::string &output_merged, const std::vector<std::string> &output_unmerged, const int min_overlap, const double max_mismatch_rate, const std::string &consensus_mode, const bool trim_overhang, const bool revcomp_R2, const int nthreads);
 void rcpp_fraq_quality_filter(const std::vector<std::string> &input, const std::vector<std::string> &output, const double min_mean_quality, const int max_low_q_bases, const int low_q_threshold, const int nthreads);
 DataFrame rcpp_fraq_trim_adapters(const std::vector<std::string> &input, const std::vector<std::string> &output, const std::vector<std::string> &adapters, const int max_distance, const bool filter_untrimmed, const int nthreads);
-Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input, const bool phred33, const int min_overlap, const double max_mismatch_rate, const int nthreads);
+Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input, const bool phred33, const int min_overlap, const double max_mismatch_rate, const size_t limit, const int nthreads);
 DataFrame rcpp_fraq_align(CharacterVector query, CharacterVector target, int max_distance, std::string ambiguity_base, std::string boundary, std::string distance_metric);
 DataFrame rcpp_fraq_mem_list();
 bool rcpp_fraq_mem_remove(const std::string &mem_key);
@@ -196,7 +199,7 @@ int rcpp_fraq_options(const std::string & option, const int value, const bool se
 void rcpp_fraq_downsample(std::vector<std::string> input, const std::vector<std::string> &output, const double amount, const int nthreads = 1) {
   if(input.size() == 0 || input.size() != output.size()) throw(std::runtime_error("input and output must be character vectors of the same length > 0"));
   if(amount > 1 || amount < 0) throw(std::runtime_error("amount must between 0 and 1"));
-  auto downsample_task = [&](fraq::input_t reads, size_t index) -> output_t {
+  auto downsample_task = [&](input_t reads, size_t index) -> output_t {
     const double scaled_index = amount * static_cast<double>(index);
     const double scaled_next = amount * static_cast<double>(index + 1);
     if (std::floor(scaled_next) > std::floor(scaled_index)) {
@@ -209,9 +212,51 @@ void rcpp_fraq_downsample(std::vector<std::string> input, const std::vector<std:
 }
 
 // [[Rcpp::export(rng=false)]]
+void rcpp_fraq_slice(std::vector<std::string> input,
+                     const std::vector<std::string> &output,
+                     const size_t limit,
+                     const std::vector<size_t> &select,
+                     const int nthreads = 1) {
+  if (input.empty() || input.size() != output.size()) {
+    throw std::runtime_error("input and output must be character vectors of the same length > 0");
+  }
+
+  bool has_select = limit == 0; // assume we want to use select if limit not supplied (0 is a special value that indicates no limit)
+  if (has_select) {
+    std::unordered_set<size_t> select_ids;
+    if (select.size() == 0) { // early exit for special case where numeric(0) is supplied to select
+      return;
+    }
+    select_ids.reserve(select.size());
+    size_t max_id = 0;
+    for (const size_t id : select) {
+      select_ids.insert(id);
+      if (id > max_id) {
+        max_id = id;
+      }
+    }
+    auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false, max_id + 1);
+    auto select_task = [&](input_t reads, size_t index) -> output_t {
+      const bool keep = select_ids.find(index) != select_ids.end();
+      if (!keep) {
+        return {};
+      }
+      return zip(output, std::move(reads));
+    };
+    fraq_run(input, select_task, nthreads, config);
+  } else {
+    auto identity_task = [&](input_t reads, size_t index) -> output_t {
+      return zip(output, std::move(reads));
+    };
+    auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false, limit);
+    fraq_run(input, identity_task, nthreads, config);
+  }
+}
+
+// [[Rcpp::export(rng=false)]]
 void rcpp_fraq_convert(std::vector<std::string> input, const std::vector<std::string> &output, const int nthreads = 1) {
   if(input.size() == 0 || input.size() != output.size()) throw(std::runtime_error("input and output must be character vectors of the same length > 0"));
-  auto convert_task = [&](fraq::input_t reads, size_t index) -> output_t {
+  auto convert_task = [&](input_t reads, size_t index) -> output_t {
     return zip(output, std::move(reads));
   };
   auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false);
@@ -234,7 +279,7 @@ void rcpp_fraq_chunk(std::vector<std::string> input, const std::vector<std::stri
     throw std::runtime_error("output_suffix must be one of (zst, gz, fastq, fraq or mem)");
   }();
 
-  auto chunk_task = [&](fraq::input_t reads, size_t index) -> output_t {
+  auto chunk_task = [&](input_t reads, size_t index) -> output_t {
     size_t chunk_number = index / chunk_size_value;
     output_t outputs(reads.size());
     outputs.reserve(output_prefix.size());
@@ -282,7 +327,7 @@ DataFrame rcpp_fraq_count_barcodes(const std::vector<std::string> &input,
   auto do_match = [&](const std::string & seq, const std::string & bc) {
     return bc.size() <= seq.size() && fraq_hm_contains(bc, seq, max_distance).distance <= max_distance;
   };
-  auto count_barcodes_task = [&](fraq::input_t reads, size_t index) -> output_t {
+  auto count_barcodes_task = [&](input_t reads, size_t index) -> output_t {
     std::unordered_map<std::string, uint64_t> &local_map = count_maps.local();
     std::string bc_match;
     for(size_t i= 0; i < barcodes.size(); ++i) {
@@ -368,7 +413,7 @@ void rcpp_fraq_demux(const std::vector<std::string> &input,
     output_suffix[i] = fmt.substr(pos + placeholder.size());
   }
 
-  auto zip_demux_output = [&](fraq::input_t &&reads, const std::string &barcode) {
+  auto zip_demux_output = [&](input_t &&reads, const std::string &barcode) {
     output_t out;
     out.reserve(output_prefix.size());
     if (reads.size() != output_prefix.size()) {
@@ -379,7 +424,7 @@ void rcpp_fraq_demux(const std::vector<std::string> &input,
     }
     return out;
   };
-  auto demux_task = [&](fraq::input_t reads, size_t /*index*/) -> output_t {
+  auto demux_task = [&](input_t reads, size_t /*index*/) -> output_t {
     if (reads.empty()) return {};
     std::string bc_match;
     for(size_t i = 0; i < barcodes.size(); ++i) {
@@ -440,7 +485,7 @@ void rcpp_fraq_quality_filter(const std::vector<std::string> &input,
     return true;
   };
 
-  auto filter_task = [&](fraq::input_t reads, size_t /*index*/) -> output_t {
+  auto filter_task = [&](input_t reads, size_t /*index*/) -> output_t {
     if (reads.size() != output.size()) {
       throw std::runtime_error("fraq_quality_filter expected reads.size() == output.size()");
     }
@@ -508,7 +553,7 @@ Rcpp::List rcpp_fraq_merge_pairs(const std::vector<std::string> &input,
     return out;
   };
 
-  auto merge_task = [&](fraq::input_t reads, size_t /*index*/) -> output_t {
+  auto merge_task = [&](input_t reads, size_t /*index*/) -> output_t {
     if (reads.size() != 2) {
       throw std::runtime_error("fraq_merge_pairs expects exactly 2 reads per record");
     }
@@ -667,7 +712,7 @@ DataFrame rcpp_fraq_trim_adapters(const std::vector<std::string> &input,
   if(max_distance < 0) throw(std::runtime_error("max_distance must be non-negative"));
 
   tbb::enumerable_thread_specific<std::unordered_map<std::string, uint64_t>> count_maps;
-  auto trim_task = [&](fraq::input_t reads, size_t index) -> output_t {
+  auto trim_task = [&](input_t reads, size_t index) -> output_t {
     std::unordered_map<std::string, uint64_t> &local_map = count_maps.local();
     for(auto & adapter : adapters) {
       auto res = fraq_hm_starts(adapter, reads[0].seq, max_distance);
@@ -718,6 +763,7 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
                              const bool phred33 = true,
                              const int min_overlap = 12,
                              const double max_mismatch_rate = 0.10,
+                             const size_t limit = 0,
                              const int nthreads = 1) {
     if (input.size() == 0 || input.size() > 2) {
         throw std::runtime_error("input must contain 1 or 2 fastq files");
@@ -785,7 +831,7 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
     tbb::enumerable_thread_specific<Accum> acc2_tls;
     tbb::enumerable_thread_specific<std::unordered_map<int, uint64_t>> insert_tls;
 
-    auto summary_task_single = [&](fraq::input_t reads, size_t /*read_index*/) -> fraq::output_t {
+    auto summary_task_single = [&](input_t reads, size_t /*read_index*/) -> fraq::output_t {
         if (reads.size() != 1) {
             throw std::runtime_error("rcpp_fraq_summary(single-end): expected batches of size 1");
         }
@@ -793,7 +839,7 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
         return {};
     };
 
-    auto summary_task_paired = [&](fraq::input_t reads, size_t /*read_index*/) -> fraq::output_t {
+    auto summary_task_paired = [&](input_t reads, size_t /*read_index*/) -> fraq::output_t {
         if (reads.size() != 2) {
             throw std::runtime_error("rcpp_fraq_summary(paired-end): expected batches of size 2");
         }
@@ -815,10 +861,10 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
     };
 
     if (input.size() == 1) {
-        auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false);
+        auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false, limit);
         fraq_run(input, summary_task_single, nthreads, config);
     } else {
-        auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false);
+        auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false, limit);
         fraq_run(input, summary_task_paired, nthreads, config);
     }
 
@@ -993,6 +1039,15 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
     }
 
     return out;
+}
+
+// legacy entry point without limit (keeps compatibility with existing registrations)
+Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
+                             const bool phred33,
+                             const int min_overlap,
+                             const double max_mismatch_rate,
+                             const int nthreads) {
+    return rcpp_fraq_summary(input, phred33, min_overlap, max_mismatch_rate, static_cast<size_t>(0), nthreads);
 }
 
 

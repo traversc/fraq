@@ -35,6 +35,19 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// rcpp_fraq_slice
+void rcpp_fraq_slice(std::vector<std::string> input, const std::vector<std::string>& output, const size_t limit, const std::vector<size_t>& select, const int nthreads);
+RcppExport SEXP _fraq_rcpp_fraq_slice(SEXP inputSEXP, SEXP outputSEXP, SEXP limitSEXP, SEXP selectSEXP, SEXP nthreadsSEXP) {
+BEGIN_RCPP
+    Rcpp::traits::input_parameter< std::vector<std::string> >::type input(inputSEXP);
+    Rcpp::traits::input_parameter< const std::vector<std::string>& >::type output(outputSEXP);
+    Rcpp::traits::input_parameter< const size_t >::type limit(limitSEXP);
+    Rcpp::traits::input_parameter< const std::vector<size_t>& >::type select(selectSEXP);
+    Rcpp::traits::input_parameter< const int >::type nthreads(nthreadsSEXP);
+    rcpp_fraq_slice(input, output, limit, select, nthreads);
+    return R_NilValue;
+END_RCPP
+}
 // rcpp_fraq_convert
 void rcpp_fraq_convert(std::vector<std::string> input, const std::vector<std::string>& output, const int nthreads);
 RcppExport SEXP _fraq_rcpp_fraq_convert(SEXP inputSEXP, SEXP outputSEXP, SEXP nthreadsSEXP) {
@@ -145,16 +158,17 @@ BEGIN_RCPP
 END_RCPP
 }
 // rcpp_fraq_summary
-Rcpp::List rcpp_fraq_summary(const std::vector<std::string>& input, const bool phred33, const int min_overlap, const double max_mismatch_rate, const int nthreads);
-RcppExport SEXP _fraq_rcpp_fraq_summary(SEXP inputSEXP, SEXP phred33SEXP, SEXP min_overlapSEXP, SEXP max_mismatch_rateSEXP, SEXP nthreadsSEXP) {
+Rcpp::List rcpp_fraq_summary(const std::vector<std::string>& input, const bool phred33, const int min_overlap, const double max_mismatch_rate, const size_t limit, const int nthreads);
+RcppExport SEXP _fraq_rcpp_fraq_summary(SEXP inputSEXP, SEXP phred33SEXP, SEXP min_overlapSEXP, SEXP max_mismatch_rateSEXP, SEXP limitSEXP, SEXP nthreadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::traits::input_parameter< const std::vector<std::string>& >::type input(inputSEXP);
     Rcpp::traits::input_parameter< const bool >::type phred33(phred33SEXP);
     Rcpp::traits::input_parameter< const int >::type min_overlap(min_overlapSEXP);
     Rcpp::traits::input_parameter< const double >::type max_mismatch_rate(max_mismatch_rateSEXP);
+    Rcpp::traits::input_parameter< const size_t >::type limit(limitSEXP);
     Rcpp::traits::input_parameter< const int >::type nthreads(nthreadsSEXP);
-    rcpp_result_gen = Rcpp::wrap(rcpp_fraq_summary(input, phred33, min_overlap, max_mismatch_rate, nthreads));
+    rcpp_result_gen = Rcpp::wrap(rcpp_fraq_summary(input, phred33, min_overlap, max_mismatch_rate, limit, nthreads));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -205,6 +219,7 @@ END_RCPP
 static const R_CallMethodDef CallEntries[] = {
     {"_fraq_rcpp_fraq_options", (DL_FUNC) &_fraq_rcpp_fraq_options, 3},
     {"_fraq_rcpp_fraq_downsample", (DL_FUNC) &_fraq_rcpp_fraq_downsample, 4},
+    {"_fraq_rcpp_fraq_slice", (DL_FUNC) &_fraq_rcpp_fraq_slice, 5},
     {"_fraq_rcpp_fraq_convert", (DL_FUNC) &_fraq_rcpp_fraq_convert, 3},
     {"_fraq_rcpp_fraq_chunk", (DL_FUNC) &_fraq_rcpp_fraq_chunk, 5},
     {"_fraq_rcpp_fraq_concat", (DL_FUNC) &_fraq_rcpp_fraq_concat, 3},
@@ -213,7 +228,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fraq_rcpp_fraq_quality_filter", (DL_FUNC) &_fraq_rcpp_fraq_quality_filter, 6},
     {"_fraq_rcpp_fraq_merge_pairs", (DL_FUNC) &_fraq_rcpp_fraq_merge_pairs, 9},
     {"_fraq_rcpp_fraq_trim_adapters", (DL_FUNC) &_fraq_rcpp_fraq_trim_adapters, 6},
-    {"_fraq_rcpp_fraq_summary", (DL_FUNC) &_fraq_rcpp_fraq_summary, 5},
+    {"_fraq_rcpp_fraq_summary", (DL_FUNC) &_fraq_rcpp_fraq_summary, 6},
     {"_fraq_rcpp_fraq_align", (DL_FUNC) &_fraq_rcpp_fraq_align, 6},
     {"_fraq_rcpp_fraq_mem_list", (DL_FUNC) &_fraq_rcpp_fraq_mem_list, 0},
     {"_fraq_rcpp_fraq_mem_remove", (DL_FUNC) &_fraq_rcpp_fraq_mem_remove, 1},
