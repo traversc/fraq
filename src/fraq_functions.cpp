@@ -5,6 +5,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <atomic>
+#include <chrono>
+#include <exception>
+#include <thread>
 #include <unordered_set>
 #include <tbb/global_control.h>
 #include <tbb/enumerable_thread_specific.h>
@@ -33,6 +37,7 @@ Rcpp::List rcpp_fraq_merge_pairs(const std::vector<std::string> &input, const st
 void rcpp_fraq_quality_filter(const std::vector<std::string> &input, const std::vector<std::string> &output, const double min_mean_quality, const int max_low_q_bases, const int low_q_threshold, const int nthreads);
 DataFrame rcpp_fraq_trim_adapters(const std::vector<std::string> &input, const std::vector<std::string> &output, const std::vector<std::string> &adapters, const int max_distance, const bool filter_untrimmed, const int nthreads);
 Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input, const bool phred33, const int min_overlap, const double max_mismatch_rate, const size_t limit, const int nthreads);
+void rcpp_fraq_wait(std::vector<std::string> input, const std::vector<std::string> &output, const int sleep_ms, const int nthreads);
 DataFrame rcpp_fraq_align(CharacterVector query, CharacterVector target, int max_distance, std::string ambiguity_base, std::string boundary, std::string distance_metric);
 DataFrame rcpp_fraq_mem_list();
 bool rcpp_fraq_mem_remove(const std::string &mem_key);
@@ -47,6 +52,31 @@ static int GZIP_COMPRESS_LEVEL = 6;
 
 // global in memory fastq store
 static std::unordered_map<std::string, std::vector<fraq_internal::CompressedReadBlock>> mem_store;
+
+struct InterruptState {
+  std::atomic<bool> requested{false};
+  std::exception_ptr exception;
+};
+
+static bool interrupt_flag_check(void* ctx) {
+  auto* state = static_cast<InterruptState*>(ctx);
+  if (!state) return false;
+  return state->requested.load(std::memory_order_acquire);
+}
+
+static bool interrupt_r_check(void* ctx) {
+  auto* state = static_cast<InterruptState*>(ctx);
+  try {
+    Rcpp::checkUserInterrupt();
+  } catch (...) {
+    if (state) {
+      state->requested.store(true, std::memory_order_release);
+      state->exception = std::current_exception();
+    }
+    return true;
+  }
+  return false;
+}
 
 // Helper used by multiple kernels to compute the best overlap length
 static size_t fraq_calculate_overlap(const std::string &seq1,
@@ -89,20 +119,84 @@ static size_t fraq_calculate_overlap(const std::string &seq1,
 ///////////////////////////////////////////////////////////////////////////////
 // functions exported to C++
 
-void fraq_run(const std::vector<std::string> &input_files, fraq::process_task_t task, const int nthreads = 1, fraq::FraqRunConfig config = fraq::FraqRunConfig{}) {
-  tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, nthreads);
-  fraq_internal::FraqRunGraph fg(input_files, task, config, mem_store);
-  fg.wait_and_flush();
-  auto excess = fg.check_reader_balance();
-  if (!excess.empty()) {
-    Rcpp::Rcerr << "fraq_run detected excess reads from inputs: ";
-    bool first = true;
-    for (size_t idx : excess) {
-      if (!first) Rcpp::Rcerr << ", ";
-      Rcpp::Rcerr << idx;
-      first = false;
+void fraq_run(const std::vector<std::string> &input_files, fraq::process_task_t task, int nthreads = 1, fraq::FraqRunConfig config = fraq::FraqRunConfig{}) {
+  if (nthreads <= 1) {
+    nthreads = 1;
+    InterruptState interrupt_state;
+    config.interrupt_fn = interrupt_r_check;
+    config.interrupt_ctx = &interrupt_state;
+    tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, nthreads);
+    fraq_internal::FraqRunGraph fg(input_files, task, config, mem_store);
+    fg.wait_and_flush();
+    if (interrupt_state.exception) {
+      Rcpp::warning("fraq interrupted");
+      std::rethrow_exception(interrupt_state.exception);
+    } else {
+      auto excess = fg.check_reader_balance();
+      if (!excess.empty()) {
+        Rcpp::Rcerr << "fraq_run detected excess reads from inputs: ";
+        bool first = true;
+        for (size_t idx : excess) {
+          if (!first) Rcpp::Rcerr << ", ";
+          Rcpp::Rcerr << idx;
+          first = false;
+        }
+        Rcpp::Rcerr << std::endl;
+      }
+      return;
     }
-    Rcpp::Rcerr << std::endl;
+  } else { // nthreads > 1
+    InterruptState interrupt_state;
+    config.interrupt_fn = interrupt_flag_check;
+    config.interrupt_ctx = &interrupt_state;
+
+    std::exception_ptr worker_err;
+    std::atomic<bool> done{false};
+    std::vector<size_t> excess;
+
+    std::thread worker([&]() {
+      try {
+        tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, nthreads);
+        fraq_internal::FraqRunGraph fg(input_files, task, config, mem_store);
+        fg.wait_and_flush();
+        if (!fg.was_interrupted()) {
+          excess = fg.check_reader_balance();
+        }
+      } catch (...) {
+        worker_err = std::current_exception();
+      }
+      done.store(true, std::memory_order_release);
+    });
+
+    while (!done.load(std::memory_order_acquire)) {
+      try {
+        Rcpp::checkUserInterrupt();
+      } catch (...) {
+        interrupt_state.requested.store(true, std::memory_order_release);
+        interrupt_state.exception = std::current_exception();
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+
+    worker.join();
+
+    if (interrupt_state.exception) {
+      Rcpp::warning("fraq interrupted");
+      std::rethrow_exception(interrupt_state.exception);
+    } else if (!excess.empty()) {
+      Rcpp::Rcerr << "fraq_run detected excess reads from inputs: ";
+      bool first = true;
+      for (size_t idx : excess) {
+        if (!first) Rcpp::Rcerr << ", ";
+        Rcpp::Rcerr << idx;
+        first = false;
+      }
+      Rcpp::Rcerr << std::endl;
+    }
+    if (worker_err) {
+      std::rethrow_exception(worker_err);
+    }
   }
 }
 
@@ -305,6 +399,8 @@ void rcpp_fraq_concat(const std::vector<std::string> &input,
   auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false);
   fraq_concat(input, output, nthreads, config);
 }
+
+
 
 
 // [[Rcpp::export(rng=false)]]
@@ -1107,6 +1203,30 @@ DataFrame rcpp_fraq_align(
         _["distance"] = dists
     );
 }
+
+// kernel intended for internal testing
+// [[Rcpp::export(rng=false)]]
+void rcpp_fraq_wait(std::vector<std::string> input,
+                    const std::vector<std::string> &output,
+                    const int sleep_ms,
+                    const int nthreads = 1) {
+  if (input.size() == 0 || input.size() != output.size()) {
+    throw std::runtime_error("input and output must be character vectors of the same length > 0");
+  }
+  if (sleep_ms < 0) {
+    throw std::runtime_error("sleep_ms must be >= 0");
+  }
+  auto wait_task = [&](input_t reads, size_t index) -> output_t {
+    (void)index;
+    if (sleep_ms > 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
+    }
+    return zip(output, std::move(reads));
+  };
+  auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false);
+  fraq_run(input, wait_task, nthreads, config);
+}
+
 
 // [[Rcpp::export(rng=false)]]
 DataFrame rcpp_fraq_mem_list() {

@@ -124,6 +124,8 @@ struct FraqRunConfig {
     int gzip_compress_level = 6;
     bool serial_kernel = false; // use serial kernel or unlimited kernel
     size_t limit = 0; // 0 means no limit
+    bool (*interrupt_fn)(void* ctx) = nullptr;
+    void* interrupt_ctx = nullptr;
     FraqRunConfig() {}
     FraqRunConfig(size_t blocksize, int fraq_compress_level, int zstd_compress_level, int gzip_compress_level, bool serial_kernel, size_t limit = 0)
       : blocksize(blocksize),

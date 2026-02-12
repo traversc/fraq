@@ -31,11 +31,11 @@ indicated by \code{output_suffix}.
 \details{
 The suffix mapping follows:
 \itemize{
-\item \code{"fastq"} → \code{.fastq}
-\item \code{"gz"} → \code{.fastq.gz}
-\item \code{"zst"} → \code{.fastq.zst}
-\item \code{"fraq"} → \code{.fraq}
-\item \code{"mem"} → \code{.mem}
+\item \code{"fastq"} -> \code{.fastq}
+\item \code{"gz"} -> \code{.fastq.gz}
+\item \code{"zst"} -> \code{.fastq.zst}
+\item \code{"fraq"} -> \code{.fraq}
+\item \code{"mem"} -> \code{.mem}
 }
 }
 \examples{

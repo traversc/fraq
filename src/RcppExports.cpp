@@ -187,6 +187,18 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// rcpp_fraq_wait
+void rcpp_fraq_wait(std::vector<std::string> input, const std::vector<std::string>& output, const int sleep_ms, const int nthreads);
+RcppExport SEXP _fraq_rcpp_fraq_wait(SEXP inputSEXP, SEXP outputSEXP, SEXP sleep_msSEXP, SEXP nthreadsSEXP) {
+BEGIN_RCPP
+    Rcpp::traits::input_parameter< std::vector<std::string> >::type input(inputSEXP);
+    Rcpp::traits::input_parameter< const std::vector<std::string>& >::type output(outputSEXP);
+    Rcpp::traits::input_parameter< const int >::type sleep_ms(sleep_msSEXP);
+    Rcpp::traits::input_parameter< const int >::type nthreads(nthreadsSEXP);
+    rcpp_fraq_wait(input, output, sleep_ms, nthreads);
+    return R_NilValue;
+END_RCPP
+}
 // rcpp_fraq_mem_list
 DataFrame rcpp_fraq_mem_list();
 RcppExport SEXP _fraq_rcpp_fraq_mem_list() {
@@ -230,6 +242,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fraq_rcpp_fraq_trim_adapters", (DL_FUNC) &_fraq_rcpp_fraq_trim_adapters, 6},
     {"_fraq_rcpp_fraq_summary", (DL_FUNC) &_fraq_rcpp_fraq_summary, 6},
     {"_fraq_rcpp_fraq_align", (DL_FUNC) &_fraq_rcpp_fraq_align, 6},
+    {"_fraq_rcpp_fraq_wait", (DL_FUNC) &_fraq_rcpp_fraq_wait, 4},
     {"_fraq_rcpp_fraq_mem_list", (DL_FUNC) &_fraq_rcpp_fraq_mem_list, 0},
     {"_fraq_rcpp_fraq_mem_remove", (DL_FUNC) &_fraq_rcpp_fraq_mem_remove, 1},
     {"_fraq_fraq_fifo_supported", (DL_FUNC) &_fraq_fraq_fifo_supported, 0},

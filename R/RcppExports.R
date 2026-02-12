@@ -53,6 +53,10 @@ rcpp_fraq_align <- function(query, target, max_distance = 2147483647L, ambiguity
     .Call(`_fraq_rcpp_fraq_align`, query, target, max_distance, ambiguity_base, boundary, distance_metric)
 }
 
+rcpp_fraq_wait <- function(input, output, sleep_ms, nthreads = 1L) {
+    invisible(.Call(`_fraq_rcpp_fraq_wait`, input, output, sleep_ms, nthreads))
+}
+
 rcpp_fraq_mem_list <- function() {
     .Call(`_fraq_rcpp_fraq_mem_list`)
 }

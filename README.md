@@ -26,6 +26,15 @@ performance.
 Install development version with
 `remotes::install_github("traversc/fraq")`
 
+Install the stable Bioconductor release with:
+
+``` r
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager")
+}
+BiocManager::install("fraq")
+```
+
 ## Pre-built functions
 
 fraq ships with a collection of ready-to-go kernels that cover common

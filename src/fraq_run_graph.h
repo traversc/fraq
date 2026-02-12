@@ -10,6 +10,7 @@
 #include <utility>
 #include <limits>
 #include <atomic>
+#include <cstdio>
 #include <stdexcept>
 #include <sstream>
 #include <memory>
@@ -203,6 +204,7 @@ struct FraqRunGraph {
   graph flow_graph;
   const FraqRunConfig config;
   std::unordered_map<std::string, std::vector<CompressedReadBlock>> & mem_store; // external memory store for .mem files
+  std::atomic<bool> interrupted{false};
   
   // Reader nodes
   // block_index_limit will be atomicly updated if one of the readers reaches EOF
@@ -322,6 +324,10 @@ struct FraqRunGraph {
   void wait_and_flush() {
     // wait for all data processing to finish
     flow_graph.wait_for_all();
+    if (was_interrupted()) {
+      cleanup_outputs();
+      return;
+    }
 
     // Concurrent flush of FRAQ writers
     for (auto& kv : fraqf_writer_map) {
@@ -382,6 +388,40 @@ struct FraqRunGraph {
     return excess_indices;
   }
 
+  bool was_interrupted() const {
+    return interrupted.load(std::memory_order_acquire);
+  }
+
+  void cleanup_outputs() {
+    for (auto& kv : fastq_writer_map) {
+      const std::string& path = kv.first;
+      if (ends_with(path, ".fifo")) {
+        try {
+          kv.second->writer.close();
+        } catch (...) {
+        }
+        continue;
+      }
+      try {
+        kv.second->writer.close();
+      } catch (...) {
+      }
+      std::remove(path.c_str());
+    }
+    for (auto& kv : fraqf_writer_map) {
+      const std::string& path = kv.first;
+      if (ends_with(path, ".mem")) {
+        mem_store.erase(path);
+        continue;
+      }
+      try {
+        kv.second->writer.close();
+      } catch (...) {
+      }
+      std::remove(path.c_str());
+    }
+  }
+
   
   // initialization helpers
   std::vector<MultiReader> readers_init(const std::vector<std::string> &input_files) {
@@ -397,8 +437,27 @@ struct FraqRunGraph {
     return readers;
   }
   // node bodies
+  bool interrupt_requested() {
+    if (interrupted.load(std::memory_order_acquire)) {
+      return true;
+    }
+    if (config.interrupt_fn && config.interrupt_fn(config.interrupt_ctx)) {
+      interrupted.store(true, std::memory_order_release);
+      return true;
+    }
+    return false;
+  }
+
   // Primary reader (reader_index = 0). Reads one block and triggers secondary readers.
   BlockPtr primary_reader_step() {
+      if (interrupt_requested()) {
+        // Return an empty block to propagate the interrupt
+        // Matches EOF semantics: joiner drops it, no further work is scheduled.
+        auto b = std::make_shared<Block>();
+        b->index = current_index[0];
+        b->reader_index = 0;
+        return b;
+      }
       // Schedule secondary readers for this step BEFORE reading primary,
       // so other threads can begin work immediately.
       for (auto &fn : secondary_reader_nodes) {

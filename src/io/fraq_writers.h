@@ -445,6 +445,7 @@ struct IFraqfWriter {
     virtual ~IFraqfWriter() = default;
     virtual void write_compressed_block(CompressedReadBlock&& block) = 0; // destructive, must std::move
     virtual void flush() = 0;
+    virtual void close() = 0;
 };
 
 // .fraq on-disk writer
@@ -480,6 +481,10 @@ struct FraqfFileWriter : IFraqfWriter {
         ofs.flush();
         if (!ofs) throw std::runtime_error("FraqfFileWriter: flush failed");
     }
+    void close() override {
+        ofs.close();
+        if (!ofs) throw std::runtime_error("FraqfFileWriter: close failed");
+    }
 };
 
 // .mem in-memory writer
@@ -503,6 +508,9 @@ struct FraqfMemWriter : IFraqfWriter {
     }
 
     void flush() override {
+        // nothing to do for memory sink
+    }
+    void close() override {
         // nothing to do for memory sink
     }
 };
@@ -537,6 +545,9 @@ struct FraqfMultiWriter {
 
     void flush() {
         impl->flush();
+    }
+    void close() {
+        impl->close();
     }
 };
 
