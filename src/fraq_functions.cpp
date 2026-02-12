@@ -1,7 +1,10 @@
+#include <Rcpp.h>
+
 #include "fraq_defines.h"
 #include "fraq_run_graph.h"
 #include "fraq_concat.h"
 #include "distance_functions.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cctype>
@@ -12,7 +15,6 @@
 #include <unordered_set>
 #include <tbb/global_control.h>
 #include <tbb/enumerable_thread_specific.h>
-#include <Rcpp.h>
 
 using namespace Rcpp;
 using fraq::output_t; // std::vector<outpair_t>, outpair_t = std::pair<std::string /*output file*/, Read>
