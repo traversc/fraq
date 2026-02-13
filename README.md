@@ -2,14 +2,15 @@ fraq: A high-throughput extensible toolkit for processing fastq data
 ================
 
 `fraq` is a high-throughput extensible toolkit for processing fastq
-data. It builds on Intel TBB’s flow graph to orchestrate concurrent I/O
-and data processing. This means that throughput can be as fast as
+data. The goal of this package is to empower users to quickly build out
+programmatic ‘kernels’ to define any FASTQ processing task they may
+need. `fraq` then takes those kernels and handles I/O, compression and
+multithreading. It builds on Intel TBB’s flow graph to orchestrate
+concurrency and data processing; throughput can be as fast as
 compression and disk speed allow.
 
 The package ships with a suite of predefined ‘kernels’ for common FASTQ
-tasks, and its extension system lets you drop in custom kernels so you
-can cover almost any FASTQ processing workflow without giving up
-performance.
+tasks, detailed in this vignette.
 
 ## Why use fraq?
 
@@ -22,11 +23,6 @@ performance.
 ## Quick start
 
 **Install**
-
-Install development version with
-`remotes::install_github("traversc/fraq")`
-
-Install the stable Bioconductor release with:
 
 ``` r
 if (!requireNamespace("BiocManager", quietly = TRUE)) {

@@ -1,4 +1,4 @@
-# fraq 0.99.1 (2026-02-11)
+# fraq 0.99.2 (2026-02-12)
 - Add user interrupt checks
 - Add package man page
 - Add installation instructions in vignette

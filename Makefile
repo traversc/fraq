@@ -52,6 +52,21 @@ install:
 	R CMD build .
 	R CMD INSTALL $(BUILD)
 
+install-no-vignette:
+	find . -type d -exec chmod 755 {} \;
+	find . -type f -exec chmod 644 {} \;
+	chmod 755 cleanup
+	chmod 755 configure
+	./configure
+	./cleanup
+	Rscript -e "library(Rcpp); compileAttributes('.');"
+	Rscript -e "devtools::load_all(); roxygen2::roxygenise('.');"
+	find . -iname "*.a" -exec rm {} \;
+	find . -iname "*.o" -exec rm {} \;
+	find . -iname "*.so" -exec rm {} \;
+	R CMD build . --no-build-vignettes
+	R CMD INSTALL $(BUILD)
+
 vignette:
 	Rscript -e "rmarkdown::render('vignettes/fraq_getting_started.Rmd', output_format = BiocStyle::html_document())"
 	Rscript -e "rmarkdown::render('vignettes/fraq_getting_started.Rmd', output_format=rmarkdown::github_document(html_preview=FALSE))"

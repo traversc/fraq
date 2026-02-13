@@ -2,8 +2,8 @@
 % Please edit documentation in R/zzz.R
 \docType{package}
 \name{fraq-package}
-\alias{fraq-package}
 \alias{fraq}
+\alias{fraq-package}
 \title{fraq: fastq processing with TBB flow graphs}
 \description{
 fraq is a high-throughput toolkit for FASTQ processing. It uses a TBB flow

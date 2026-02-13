@@ -58,23 +58,20 @@ static std::unordered_map<std::string, std::vector<fraq_internal::CompressedRead
 struct InterruptState {
   std::atomic<bool> requested{false};
   std::exception_ptr exception;
+  std::thread::id main_thread_id;
 };
-
-static bool interrupt_flag_check(void* ctx) {
-  auto* state = static_cast<InterruptState*>(ctx);
-  if (!state) return false;
-  return state->requested.load(std::memory_order_acquire);
-}
 
 static bool interrupt_r_check(void* ctx) {
   auto* state = static_cast<InterruptState*>(ctx);
+  if (!state) return false;
+  if (state->main_thread_id != std::this_thread::get_id()) {
+    return false;
+  }
   try {
     Rcpp::checkUserInterrupt();
   } catch (...) {
-    if (state) {
-      state->requested.store(true, std::memory_order_release);
-      state->exception = std::current_exception();
-    }
+    state->requested.store(true, std::memory_order_release);
+    state->exception = std::current_exception();
     return true;
   }
   return false;
@@ -124,69 +121,20 @@ static size_t fraq_calculate_overlap(const std::string &seq1,
 void fraq_run(const std::vector<std::string> &input_files, fraq::process_task_t task, int nthreads = 1, fraq::FraqRunConfig config = fraq::FraqRunConfig{}) {
   if (nthreads <= 1) {
     nthreads = 1;
-    InterruptState interrupt_state;
-    config.interrupt_fn = interrupt_r_check;
-    config.interrupt_ctx = &interrupt_state;
-    tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, nthreads);
-    fraq_internal::FraqRunGraph fg(input_files, task, config, mem_store);
-    fg.wait_and_flush();
-    if (interrupt_state.exception) {
-      Rcpp::warning("fraq interrupted");
-      std::rethrow_exception(interrupt_state.exception);
-    } else {
-      auto excess = fg.check_reader_balance();
-      if (!excess.empty()) {
-        Rcpp::Rcerr << "fraq_run detected excess reads from inputs: ";
-        bool first = true;
-        for (size_t idx : excess) {
-          if (!first) Rcpp::Rcerr << ", ";
-          Rcpp::Rcerr << idx;
-          first = false;
-        }
-        Rcpp::Rcerr << std::endl;
-      }
-      return;
-    }
-  } else { // nthreads > 1
-    InterruptState interrupt_state;
-    config.interrupt_fn = interrupt_flag_check;
-    config.interrupt_ctx = &interrupt_state;
-
-    std::exception_ptr worker_err;
-    std::atomic<bool> done{false};
-    std::vector<size_t> excess;
-
-    std::thread worker([&]() {
-      try {
-        tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, nthreads);
-        fraq_internal::FraqRunGraph fg(input_files, task, config, mem_store);
-        fg.wait_and_flush();
-        if (!fg.was_interrupted()) {
-          excess = fg.check_reader_balance();
-        }
-      } catch (...) {
-        worker_err = std::current_exception();
-      }
-      done.store(true, std::memory_order_release);
-    });
-
-    while (!done.load(std::memory_order_acquire)) {
-      try {
-        Rcpp::checkUserInterrupt();
-      } catch (...) {
-        interrupt_state.requested.store(true, std::memory_order_release);
-        interrupt_state.exception = std::current_exception();
-        break;
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(25));
-    }
-
-    worker.join();
-
-    if (interrupt_state.exception) {
-      Rcpp::warning("fraq interrupted");
-      std::rethrow_exception(interrupt_state.exception);
-    } else if (!excess.empty()) {
+  }
+  InterruptState interrupt_state;
+  interrupt_state.main_thread_id = std::this_thread::get_id();
+  config.interrupt_fn = interrupt_r_check;
+  config.interrupt_ctx = &interrupt_state;
+  tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, nthreads);
+  fraq_internal::FraqRunGraph fg(input_files, task, config, mem_store);
+  fg.wait_and_flush();
+  if (interrupt_state.exception) {
+    Rcpp::warning("fraq interrupted");
+    std::rethrow_exception(interrupt_state.exception);
+  } else {
+    auto excess = fg.check_reader_balance();
+    if (!excess.empty()) {
       Rcpp::Rcerr << "fraq_run detected excess reads from inputs: ";
       bool first = true;
       for (size_t idx : excess) {
@@ -195,9 +143,6 @@ void fraq_run(const std::vector<std::string> &input_files, fraq::process_task_t 
         first = false;
       }
       Rcpp::Rcerr << std::endl;
-    }
-    if (worker_err) {
-      std::rethrow_exception(worker_err);
     }
   }
 }

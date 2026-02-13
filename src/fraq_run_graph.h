@@ -188,7 +188,9 @@ struct FraqfDemuxWriter {
       return false;
     }
     writer.write_compressed_block(std::move(it->second));
-    compressed_blocks.unsafe_erase(it);
+
+    // concurrent erase not thread safe with insert/emplace
+    // compressed_blocks.unsafe_erase(it);
     ++next_expected_index;
     return true;
   }
@@ -255,7 +257,7 @@ struct FraqRunGraph {
                  std::unordered_map<std::string, std::vector<CompressedReadBlock>> & mem_store) :
     config(config),
     mem_store(mem_store),
-    readers(readers_init(input_files)),
+    readers(),
     current_index(input_files.size(), 0),
     read_count_per_reader(input_files.size(), 0),
     primary_limiter(flow_graph, MAX_INFLIGHT_INDICES),
@@ -287,6 +289,7 @@ struct FraqRunGraph {
       [this](const continue_msg&) { return this->fraqf_writer_node_body(); }
     )
     {
+    readers = readers_init(input_files);
     const size_t limit_block = (config.limit > 0)
       ? ((config.limit - 1) / config.blocksize)
       : std::numeric_limits<size_t>::max();

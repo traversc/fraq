@@ -11,14 +11,16 @@ vignette: |
 ---
 
 
-`fraq` is a high-throughput extensible toolkit for processing fastq data. It
-builds on Intel TBB’s flow graph to orchestrate concurrent I/O and data
-processing. This means that throughput can be as fast as compression and disk
+`fraq` is a high-throughput extensible toolkit for processing fastq data. 
+The goal of this package is to empower users to quickly build out programmatic 
+'kernels' to define any FASTQ processing task they may need. `fraq` then takes 
+those kernels and handles I/O, compression and multithreading. It
+builds on Intel TBB’s flow graph to orchestrate concurrency and data
+processing; throughput can be as fast as compression and disk
 speed allow.
 
 The package ships with a suite of predefined ‘kernels’ for common FASTQ
-tasks, and its extension system lets you drop in custom kernels so you can
-cover almost any FASTQ processing workflow without giving up performance.
+tasks, detailed in this vignette. 
 
 ```{r setup, echo=FALSE, results="hide", warning=FALSE, eval=TRUE}
 suppressPackageStartupMessages({library(fraq)})
@@ -35,11 +37,6 @@ suppressPackageStartupMessages({library(fraq)})
 ## Quick start
 
 **Install**
-
-Install development version with `remotes::install_github("traversc/fraq")`
-
-Install the stable Bioconductor release with:
-
 ```{r eval=FALSE}
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
     install.packages("BiocManager")
@@ -97,7 +94,7 @@ qc <- fraq_summary(c(R1, R2))
 ```{r fig-qc-quicklook, eval=TRUE, fig.cap="Quick QC overview from `fraq_summary()`.", fig.width=8, fig.asp=0.6, warning=FALSE, message=FALSE, echo=FALSE, fig.path="plots/"}
 
 # quick-look QC plots
-op <- par(no.readonly = TRUE)
+op <- par(no.readonly = FALSE)
 par(mfrow = c(2, 2), mar = c(4, 4, 2.5, 1))
 
 insert <- qc$insert_size

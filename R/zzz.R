@@ -13,8 +13,5 @@
 #' See individual function help pages for details on each kernel. The README
 #' contains a short walkthrough with synthetic data.
 #'
-#' @docType package
-#' @name fraq-package
-#' @aliases fraq fraq-package
 #' @keywords internal
-NULL
+"_PACKAGE"

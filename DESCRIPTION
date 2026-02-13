@@ -1,8 +1,8 @@
 Package: fraq
 Type: Package
 Title: A High-Throughput and Extensible Toolkit for Processing FASTQ Data
-Version: 0.99.1
-Date: 2026-02-11
+Version: 0.99.2
+Date: 2026-02-12
 Authors@R: c(
     person("Travers", "Ching", email = "traversc@gmail.com", role = c("aut", "cre", "cph"),
         comment = c(ORCID = "0000-0002-5577-3516")),
@@ -17,11 +17,12 @@ Authors@R: c(
     person("Mori", "Yuta", role = c("ctb", "cph"),
         comment = "Contributor/copyright holder of bundled zstd code"))
 Description: High-throughput extensible toolkit for processing FASTQ data. 
+    The goal of this package is to empower users to quickly build out small
+    programmatic 'kernels' to define any FASTQ processing task they may need.
     Builds on Intel TBB’s flow graph to orchestrate concurrent I/O and data
-    processing, throughput can be as fast as compression and disk
-    speed allows. The package ships with a suite of predefined ‘kernels’ for common FASTQ
-    tasks, and its extension system lets you drop in custom kernels so you can
-    cover almost any FASTQ processing workflow without giving up performance.
+    processing; throughput can be as fast as compression and disk
+    speed allows. The package also ships with a suite of predefined kernels 
+    for common FASTQ tasks.
 License: GPL-3
 biocViews: Software, Infrastructure, Sequencing, DNASeq, QualityControl, Alignment
 URL: https://github.com/traversc/fraq
