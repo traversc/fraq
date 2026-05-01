@@ -1,6 +1,13 @@
 fraq: A high-throughput extensible toolkit for processing fastq data
 ================
 
+<!-- badges: start -->
+
+[![Bioc release
+status](https://bioconductor.org/shields/build/release/bioc/fraq.svg)](https://bioconductor.org/checkResults/release/bioc-LATEST/fraq)
+[![R-CMD-check](https://github.com/traversc/fraq/actions/workflows/R-CMD-check.yaml/badge.svg?branch=devel)](https://github.com/traversc/fraq/actions/workflows/R-CMD-check.yaml?query=branch%3Adevel)
+<!-- badges: end -->
+
 `fraq` is a high-throughput extensible toolkit for processing fastq
 data. The goal of this package is to empower users to quickly build out
 programmatic ‘kernels’ to define any FASTQ processing task they may

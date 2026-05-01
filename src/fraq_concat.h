@@ -10,11 +10,11 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <tbb/flow_graph.h>
 #include <tbb/global_control.h>
 #include "fraq_defines.h"
 #include "io/fraq_format.h"
 #include "io/fraq_readers.h"
+#include "io/tbb_flow_compat.h"
 #include "io/fraq_writers.h"
 
 namespace fraq_internal {
@@ -108,7 +108,7 @@ struct FastqConcatGraph {
   }
 
   continue_msg write_step(const ConcatReadsBlockPtr &ptr) {
-    read_limiter.decrement.try_put(continue_msg{});
+    tbb_compat::decrementer(read_limiter).try_put(continue_msg{});
     if (ptr && !ptr->reads.empty()) {
       writer.write_block(ptr->reads);
       read_limiter.try_put(continue_msg{});
@@ -181,7 +181,7 @@ struct FraqConcatGraph {
 
   continue_msg read_step() {
     if (exhausted) {
-      read_limiter.decrement.try_put(continue_msg{});
+      tbb_compat::decrementer(read_limiter).try_put(continue_msg{});
       return continue_msg{};
     }
     while (current_reader < readers.size()) {
@@ -212,7 +212,7 @@ struct FraqConcatGraph {
       return continue_msg{};
     }
     exhausted = true;
-    read_limiter.decrement.try_put(continue_msg{});
+    tbb_compat::decrementer(read_limiter).try_put(continue_msg{});
     return continue_msg{};
   }
 
@@ -225,7 +225,7 @@ struct FraqConcatGraph {
   }
 
   continue_msg write_step(ConcatCompressedBlockPtr ptr) {
-    read_limiter.decrement.try_put(continue_msg{});
+    tbb_compat::decrementer(read_limiter).try_put(continue_msg{});
     if (ptr) {
       writer->write_compressed_block(std::move(ptr->block));
       read_limiter.try_put(continue_msg{});

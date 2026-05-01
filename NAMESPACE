@@ -3,8 +3,6 @@ useDynLib(fraq, .registration = TRUE)
 importFrom(Rcpp, sourceCpp)
 importFrom(RcppParallel, RcppParallelLibs)
 importFrom(edlibR, align)
-importFrom(ShortRead, readFastq)
-importFrom(ShortRead, writeFastq)
 importFrom(Biostrings, BStringSet)
 
 export(fraq_options)

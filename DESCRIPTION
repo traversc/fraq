@@ -1,7 +1,7 @@
 Package: fraq
 Type: Package
 Title: A High-Throughput and Extensible Toolkit for Processing FASTQ Data
-Version: 1.1.0
+Version: 1.1.1
 Date: 2026-02-12
 Authors@R: c(
     person("Travers", "Ching", email = "traversc@gmail.com", role = c("aut", "cre", "cph"),
@@ -28,10 +28,10 @@ biocViews: Software, Infrastructure, Sequencing, DNASeq, QualityControl, Alignme
 URL: https://github.com/traversc/fraq
 BugReports: https://github.com/traversc/fraq/issues
 Depends: R (>= 4.5.0)
-Imports: 
-    Rcpp, ShortRead, Biostrings, RcppParallel, edlibR, stringfish
+Imports:
+    Rcpp, Biostrings, RcppParallel, edlibR, stringfish
 LinkingTo: Rcpp, RcppParallel, edlibR
-Suggests: knitr, rmarkdown, BiocStyle, processx
+Suggests: knitr, rmarkdown, BiocStyle, processx, ShortRead
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3

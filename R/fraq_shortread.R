@@ -21,6 +21,7 @@
 #'   vector after conversion.
 #'
 #' @examples
+#' if (requireNamespace("ShortRead", quietly = TRUE)) {
 #' fq <- tempfile(fileext = ".fastq")
 #' generate_random_fastq(fq, n_reads = 10, read_length = 50)
 #' fraq_path <- tempfile(fileext = ".fraq")
@@ -30,15 +31,30 @@
 #' roundtrip_fastq <- tempfile(fileext = ".fastq")
 #' fraq_import_shortreadq(reads, roundtrip_fastq)
 #' stopifnot(file.exists(roundtrip_fastq))
+#' }
 #'
-#' @seealso [ShortRead::readFastq()], [ShortRead::writeFastq()], [fraq_convert()]
+#' @seealso `ShortRead::readFastq()`, `ShortRead::writeFastq()`,
+#'   [fraq_convert()]
 #' @name fraq_shortread
-#' @importFrom ShortRead readFastq writeFastq
 NULL
+
+check_shortread_installed <- function(caller) {
+    if (!requireNamespace("ShortRead", quietly = TRUE)) {
+        stop(
+            sprintf(
+                "`%s()` requires the suggested package ShortRead.",
+                caller
+            ),
+            "\nInstall it with BiocManager::install(\"ShortRead\").",
+            call. = FALSE
+        )
+    }
+}
 
 #' @rdname fraq_shortread
 #' @export
 fraq_export_shortreadq <- function(input, nthreads = 1L, tmpdir = tempdir()) {
+    check_shortread_installed("fraq_export_shortreadq")
     if (!length(input)) {
         stop("`input` must contain at least one path or key.")
     }
@@ -73,6 +89,7 @@ fraq_import_shortreadq <- function(
     nthreads = 1L,
     tmpdir = tempdir()
 ) {
+    check_shortread_installed("fraq_import_shortreadq")
     if (inherits(shortreadq, "ShortReadQ")) {
         sr_list <- list(shortreadq)
     } else if (is.list(shortreadq) && length(shortreadq)) {

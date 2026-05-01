@@ -38,6 +38,7 @@ vector after conversion.
 converts \code{ShortReadQ} objects to any supported FRAQ format.
 }
 \examples{
+if (requireNamespace("ShortRead", quietly = TRUE)) {
 fq <- tempfile(fileext = ".fastq")
 generate_random_fastq(fq, n_reads = 10, read_length = 50)
 fraq_path <- tempfile(fileext = ".fraq")
@@ -47,8 +48,10 @@ reads <- fraq_export_shortreadq(fraq_path)
 roundtrip_fastq <- tempfile(fileext = ".fastq")
 fraq_import_shortreadq(reads, roundtrip_fastq)
 stopifnot(file.exists(roundtrip_fastq))
+}
 
 }
 \seealso{
-\code{\link[ShortRead:readFastq]{ShortRead::readFastq()}}, \code{\link[ShortRead:readFastq]{ShortRead::writeFastq()}}, \code{\link[=fraq_convert]{fraq_convert()}}
+\code{ShortRead::readFastq()}, \code{ShortRead::writeFastq()},
+\code{\link[=fraq_convert]{fraq_convert()}}
 }

@@ -55,13 +55,13 @@ elif test "xx$PKGCONF" != "xx"; then
   if "${PKGCONF}" --exists libzstd; then
     VERSION_STRING=`${PKGCONF} --modversion libzstd`
     VER=`getVersion ${VERSION_STRING}`
-    if test "${VER}" -ge 100506; then
+    if test "${VER}" -ge 100507; then
       echo "zstd ${VERSION_STRING} library detected -- skipping zstd compilation"
       ZSTD_LIBS=`"${PKGCONF}" --libs libzstd`
       ZSTD_INCLUDE_PATH=`"${PKGCONF}" --cflags-only-I libzstd`
       COMPILE_ZSTD="false"
     else
-      echo "zstd ${VERSION_STRING} library detected but is lower than bundled version (1.5.2) -- compiling from source"
+      echo "zstd ${VERSION_STRING} library detected but is lower than bundled version (1.5.7) -- compiling from source"
       COMPILE_ZSTD="true"
     fi
   else
