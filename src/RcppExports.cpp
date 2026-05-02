@@ -59,6 +59,18 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// rcpp_fraq_run_r
+void rcpp_fraq_run_r(std::vector<std::string> input, Rcpp::Function kernel, const size_t limit, const int io_threads);
+RcppExport SEXP _fraq_rcpp_fraq_run_r(SEXP inputSEXP, SEXP kernelSEXP, SEXP limitSEXP, SEXP io_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::traits::input_parameter< std::vector<std::string> >::type input(inputSEXP);
+    Rcpp::traits::input_parameter< Rcpp::Function >::type kernel(kernelSEXP);
+    Rcpp::traits::input_parameter< const size_t >::type limit(limitSEXP);
+    Rcpp::traits::input_parameter< const int >::type io_threads(io_threadsSEXP);
+    rcpp_fraq_run_r(input, kernel, limit, io_threads);
+    return R_NilValue;
+END_RCPP
+}
 // rcpp_fraq_chunk
 void rcpp_fraq_chunk(std::vector<std::string> input, const std::vector<std::string>& output_prefix, const std::string& output_suffix, const double chunk_size, const int nthreads);
 RcppExport SEXP _fraq_rcpp_fraq_chunk(SEXP inputSEXP, SEXP output_prefixSEXP, SEXP output_suffixSEXP, SEXP chunk_sizeSEXP, SEXP nthreadsSEXP) {
@@ -233,6 +245,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fraq_rcpp_fraq_downsample", (DL_FUNC) &_fraq_rcpp_fraq_downsample, 4},
     {"_fraq_rcpp_fraq_slice", (DL_FUNC) &_fraq_rcpp_fraq_slice, 5},
     {"_fraq_rcpp_fraq_convert", (DL_FUNC) &_fraq_rcpp_fraq_convert, 3},
+    {"_fraq_rcpp_fraq_run_r", (DL_FUNC) &_fraq_rcpp_fraq_run_r, 4},
     {"_fraq_rcpp_fraq_chunk", (DL_FUNC) &_fraq_rcpp_fraq_chunk, 5},
     {"_fraq_rcpp_fraq_concat", (DL_FUNC) &_fraq_rcpp_fraq_concat, 3},
     {"_fraq_rcpp_fraq_count_barcodes", (DL_FUNC) &_fraq_rcpp_fraq_count_barcodes, 5},

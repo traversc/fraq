@@ -33,6 +33,6 @@ fraq.BiocCheck/
 configure~
 *.gz
 *.json
-
+context/**
 /.quarto/
 **/*.quarto_ipynb

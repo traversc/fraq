@@ -17,6 +17,10 @@ rcpp_fraq_convert <- function(input, output, nthreads = 1L) {
     invisible(.Call(`_fraq_rcpp_fraq_convert`, input, output, nthreads))
 }
 
+rcpp_fraq_run_r <- function(input, kernel, limit = 0L, io_threads = 1L) {
+    invisible(.Call(`_fraq_rcpp_fraq_run_r`, input, kernel, limit, io_threads))
+}
+
 rcpp_fraq_chunk <- function(input, output_prefix, output_suffix, chunk_size, nthreads = 1L) {
     invisible(.Call(`_fraq_rcpp_fraq_chunk`, input, output_prefix, output_suffix, chunk_size, nthreads))
 }

@@ -117,6 +117,82 @@ fraq_convert <- function(input, output, nthreads = 1L) {
     invisible(NULL)
 }
 
+#' Run an R kernel over sequencing reads
+#'
+#' @description Run an R function over blocks of FASTQ records while fraq
+#' keeps file I/O and compression work on background TBB threads.
+#'
+#' @param input Character vector of source files/keys.
+#' @param kernel Function called as `kernel(reads, index)`. `reads` is a named
+#' list of data frames (`read1`, `read2`, ...) with character columns `name`,
+#' `seq`, and `qual`. `index` is a numeric vector of zero-based record indices
+#' for the rows in each data frame.
+#' @param limit Optional non-negative whole-number scalar limiting processing
+#' to the first `limit` record indices. `NULL` means no limit.
+#' @param io_threads Integer number of threads for background reading, joining,
+#' compression, and writing. For paired-end inputs, values above 4 usually
+#' provide little additional benefit.
+#'
+#' @details
+#' The kernel must return `NULL` or a named list of data frames. Each list name
+#' is an output path or `.mem` key, and each data frame must contain character
+#' columns `name`, `seq`, and `qual`.
+#'
+#' The R kernel runs only on the calling R thread. Background threads are used
+#' for reading, joining, demultiplexing, compression, and writing.
+#'
+#' Do not use `parallel::mclapply()` inside the kernel. It forks the R process
+#' on Unix-like systems, and forking while fraq has active background threads can
+#' deadlock or crash. Use vectorized R code inside the kernel; if serial mapping
+#' is needed, use `lapply()` instead.
+#'
+#' @return Invisibly returns `NULL` after all outputs are written.
+#' @examples
+#' input_paths <- c(tempfile(fileext = ".fastq"), tempfile(fileext = ".fastq"))
+#' output_paths <- c(tempfile(fileext = ".fastq"), tempfile(fileext = ".fastq"))
+#' generate_random_fastq(input_paths[1], n_reads = 10, read_length = 50)
+#' generate_random_fastq(input_paths[2], n_reads = 10, read_length = 50)
+#'
+#' even_read_kernel <- function(reads, index) {
+#'     keep <- index %% 2 == 0
+#'     filtered_read1 <- reads$read1[keep, , drop = FALSE]
+#'     filtered_read2 <- reads$read2[keep, , drop = FALSE]
+#'
+#'     output <- list()
+#'     output[[output_paths[1]]] <- filtered_read1
+#'     output[[output_paths[2]]] <- filtered_read2
+#'     output
+#' }
+#'
+#' fraq_run_r(input_paths, even_read_kernel, io_threads = 2L)
+#' @export
+fraq_run_r <- function(input, kernel, limit = NULL, io_threads = 1L) {
+    if (!length(input)) {
+        stop("`input` must contain at least one file path or .mem key.")
+    }
+    if (!is.function(kernel)) {
+        stop("`kernel` must be a function.")
+    }
+    if (!is.null(limit)) {
+        if (!is.numeric(limit) || length(limit) != 1L || is.na(limit) || !is.finite(limit)) {
+            stop("`limit` must be a single numeric value.")
+        }
+        if (limit < 0) {
+            stop("`limit` must be non-negative.")
+        }
+        if (limit != floor(limit)) {
+            stop("`limit` must be a whole number.")
+        }
+        if (limit == 0) {
+            return(invisible(NULL))
+        }
+    }
+    limit_val <- if (is.null(limit)) 0 else as.numeric(limit)
+    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
+    rcpp_fraq_run_r(input, kernel, limit_val, as.integer(io_threads))
+    invisible(NULL)
+}
+
 #' Slice reads by index or limit
 #'
 #' @description Write a subset of reads from `input` to `output`, either the

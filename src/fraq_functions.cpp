@@ -2,6 +2,7 @@
 
 #include "fraq_defines.h"
 #include "fraq_run_graph.h"
+#include "fraq_run_graph_r.h"
 #include "fraq_concat.h"
 #include "distance_functions.h"
 
@@ -31,6 +32,7 @@ int rcpp_fraq_options(const std::string &option, const int value, const bool set
 void rcpp_fraq_downsample(std::vector<std::string> input, const std::vector<std::string> &output, const double amount, const int nthreads);
 void rcpp_fraq_slice(std::vector<std::string> input, const std::vector<std::string> &output, const double limit, const std::vector<double> &select, const int nthreads);
 void rcpp_fraq_convert(std::vector<std::string> input, const std::vector<std::string> &output, const int nthreads);
+void rcpp_fraq_run_r(std::vector<std::string> input, Rcpp::Function kernel, const size_t limit, const int io_threads);
 void rcpp_fraq_chunk(std::vector<std::string> input, const std::vector<std::string> &output_prefix, const std::string &output_suffix, const double chunk_size, const int nthreads);
 void rcpp_fraq_concat(const std::vector<std::string> &input, const std::string &output, const int nthreads);
 DataFrame rcpp_fraq_count_barcodes(const std::vector<std::string> &input, const std::vector<std::string> &barcodes, const int max_distance, const bool allow_revcomp, const int nthreads);
@@ -302,6 +304,66 @@ void rcpp_fraq_convert(std::vector<std::string> input, const std::vector<std::st
   };
   auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false);
   fraq_run(input, convert_task, nthreads, config);
+}
+
+// [[Rcpp::export(rng=false)]]
+void rcpp_fraq_run_r(std::vector<std::string> input,
+                     Rcpp::Function kernel,
+                     const size_t limit = 0,
+                     const int io_threads = 1) {
+  if (input.empty()) {
+    throw std::runtime_error("input must be a character vector of length > 0");
+  }
+  int thread_count = io_threads <= 1 ? 1 : io_threads;
+  InterruptState interrupt_state;
+  interrupt_state.main_thread_id = std::this_thread::get_id();
+  auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, true, limit);
+  config.interrupt_fn = interrupt_r_check;
+  config.interrupt_ctx = &interrupt_state;
+
+  tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, thread_count);
+  fraq_internal::FraqRunGraphR fg(input, config, mem_store);
+
+  try {
+    while (true) {
+      Rcpp::checkUserInterrupt();
+      fraq_internal::BlockPtrVec block;
+      if (!fg.try_pop_kernel_block(block)) {
+        fg.wait_for_idle();
+        if (!fg.try_pop_kernel_block(block)) {
+          break;
+        }
+      }
+      fraq_internal::ProcessedBlockPtr processed = fraq_internal::r_kernel_process_block(block, kernel, config);
+      fg.submit_processed_block(processed);
+    }
+    fg.wait_and_flush();
+  } catch (...) {
+    std::exception_ptr original = std::current_exception();
+    fg.request_interrupt();
+    try {
+      fg.wait_and_flush();
+    } catch (...) {
+    }
+    std::rethrow_exception(original);
+  }
+
+  if (interrupt_state.exception) {
+    Rcpp::warning("fraq interrupted");
+    std::rethrow_exception(interrupt_state.exception);
+  } else {
+    auto excess = fg.check_reader_balance();
+    if (!excess.empty()) {
+      Rcpp::Rcerr << "fraq_run_r detected excess reads from inputs: ";
+      bool first = true;
+      for (size_t idx : excess) {
+        if (!first) Rcpp::Rcerr << ", ";
+        Rcpp::Rcerr << idx;
+        first = false;
+      }
+      Rcpp::Rcerr << std::endl;
+    }
+  }
 }
 
 // [[Rcpp::export(rng=false)]]

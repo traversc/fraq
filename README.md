@@ -349,6 +349,60 @@ keep them or not (filtering) and outputs any number of fastq records
 (demux and splitting). This simple pattern naturally supports lots of
 different fastq processing operations and can be customized.
 
+For R kernels, the `Process Kernel` step uses a different execution
+path, described below.
+
+## Extension system: writing a custom kernel in R
+
+You can build a custom kernel with `fraq_run_r()`. The R function runs
+on the main R thread rather than inside a TBB graph node, so it is safe
+for it to work with R objects and call back into R. IO happens o
+background threads (determined by `io_threads`) while the R kernel stays
+on the main R thread.
+
+An R kernel is called as `kernel(reads, index)`:
+
+- The input and output data are normal R objects (data.frames and lists)
+- `reads` is a named list of data frames. Single-end input has
+  `reads$read1`; paired-end input has `reads$read1` and `reads$read2`.
+  Each data frame has character columns `name`, `seq`, and `qual`.
+- `index` is a numeric vector of zero-based read indices for the rows in
+  each data frame. It is useful for deterministic filtering, splitting,
+  or joining back to external metadata.
+- Return `NULL` to drop the whole block.
+- Return a named list of data frames to write reads. Each list name is
+  an output path, and each data frame must contain `name`, `seq`, and
+  `qual` columns.
+
+Vectorized R kernels can still perform well on large FASTQ datasets
+because they operate on full blocks rather than one read at a time.
+
+``` r
+input_paths <- c("input_R1.fastq.gz", "input_R2.fastq.gz")
+output_paths <- c("even_R1.fastq.gz", "even_R2.fastq.gz")
+
+even_read_kernel <- function(reads, index) {
+    keep <- index %% 2 == 0
+    filtered_read1 <- reads$read1[keep, , drop = FALSE]
+    filtered_read2 <- reads$read2[keep, , drop = FALSE]
+
+    output <- list()
+    output[[output_paths[1]]] <- filtered_read1
+    output[[output_paths[2]]] <- filtered_read2
+    output
+}
+
+fraq_run_r(
+    input_paths,
+    even_read_kernel,
+    io_threads = 2L
+)
+```
+
+Do not use `parallel::mclapply()` inside a `fraq_run_r()` kernel. On
+Unix-like systems it forks the R process, and forking while fraq has
+active background IO and compression threads can deadlock or crash.
+
 ## Extension system: writing a custom kernel with Rcpp
 
 If the prebuilt kernels are insufficient, you can write your own via an
@@ -413,8 +467,9 @@ fraq_gc_filter(input, output, gc_min = 0.30, gc_max = 0.70)
 ### Some important tips when building custom kernels
 
 - You are still responsible for writing safe C++
-- Avoid interacting with the R API or relying on `Rcpp` classes; if your
-  kernel interacts with R, you **must** use `nthreads = 1`
+- Avoid interacting with the R API or relying on `Rcpp` classes from a
+  `fraq::run()` C++ kernel. If the kernel needs to call R code or work
+  with R objects, use `fraq_run_r()` so R work stays on the main thread.
 
 ### Streaming with named pipes
 
@@ -453,31 +508,21 @@ bwa-mem2 mem -t 8 $HG38_REF ds_R1.fastq.fifo ds_R2.fastq.fifo > output.sam
 Global knobs live behind `fraq_options()`:
 
 ``` r
-fraq_options("blocksize")          # current block size (default: 65535 reads)
-```
+# Inspect the current block size.
+fraq_options("blocksize")
 
-    ## [1] 65535
+# Shrink batches when running small tests.
+fraq_options("blocksize", 16384L)
 
-``` r
-fraq_options("blocksize", 16384L)  # shrink batches when running small tests
-```
-
-    ## [1] 65535
-
-``` r
+# Tune compression levels for new outputs.
 fraq_options("zstd_compress_level", 6L)
-```
-
-    ## [1] 3
-
-``` r
 fraq_options("gzip_compress_level", 4L)
 ```
 
-    ## [1] 6
-
-Each kernel also accepts `nthreads`. Internally, fraq caps the TBB
-scheduler to the requested parallelism.
+Most kernels accept `nthreads`. Internally, fraq caps the TBB scheduler
+to the requested parallelism. `fraq_run_r()` uses `io_threads` instead
+because the R kernel itself runs on the main R thread; the setting only
+controls background read, join, compression, and write work.
 
 ## FRAQ file format
 
