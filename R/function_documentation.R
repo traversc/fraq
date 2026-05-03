@@ -210,6 +210,25 @@ fraq_run_r <- function(input, kernel, limit = NULL, nthreads = 1L) {
     }
     limit_val <- if (is.null(limit)) 0 else as.numeric(limit)
     input <- fraq_normalize_path_or_key(input)
+    output_name_cache <- new.env(parent = emptyenv())
+    normalize_output_names <- function(output_names) {
+        valid_names <- !is.na(output_names) & nzchar(output_names)
+        if (!any(valid_names)) {
+            return(output_names)
+        }
+        for (name in unique(output_names[valid_names])) {
+            if (!exists(name, envir = output_name_cache, inherits = FALSE)) {
+                output_name_cache[[name]] <- fraq_normalize_path_or_key(name)
+            }
+        }
+        output_names[valid_names] <- vapply(
+            output_names[valid_names],
+            function(name) output_name_cache[[name]],
+            character(1),
+            USE.NAMES = FALSE
+        )
+        output_names
+    }
     normalized_kernel <- function(reads, index) {
         output <- kernel(reads, index)
         if (is.null(output) || !is.list(output) || is.data.frame(output)) {
@@ -217,11 +236,7 @@ fraq_run_r <- function(input, kernel, limit = NULL, nthreads = 1L) {
         }
         output_names <- names(output)
         if (!is.null(output_names)) {
-            valid_names <- !is.na(output_names) & nzchar(output_names)
-            output_names[valid_names] <- fraq_normalize_path_or_key(
-                output_names[valid_names]
-            )
-            names(output) <- output_names
+            names(output) <- normalize_output_names(output_names)
         }
         output
     }
