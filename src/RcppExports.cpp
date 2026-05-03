@@ -60,14 +60,23 @@ BEGIN_RCPP
 END_RCPP
 }
 // rcpp_fraq_run_r
-void rcpp_fraq_run_r(std::vector<std::string> input, Rcpp::Function kernel, const size_t limit, const int io_threads);
-RcppExport SEXP _fraq_rcpp_fraq_run_r(SEXP inputSEXP, SEXP kernelSEXP, SEXP limitSEXP, SEXP io_threadsSEXP) {
+void rcpp_fraq_run_r(std::vector<std::string> input, Rcpp::Function kernel, const size_t limit, const int nthreads);
+RcppExport SEXP _fraq_rcpp_fraq_run_r(SEXP inputSEXP, SEXP kernelSEXP, SEXP limitSEXP, SEXP nthreadsSEXP) {
 BEGIN_RCPP
     Rcpp::traits::input_parameter< std::vector<std::string> >::type input(inputSEXP);
     Rcpp::traits::input_parameter< Rcpp::Function >::type kernel(kernelSEXP);
     Rcpp::traits::input_parameter< const size_t >::type limit(limitSEXP);
-    Rcpp::traits::input_parameter< const int >::type io_threads(io_threadsSEXP);
-    rcpp_fraq_run_r(input, kernel, limit, io_threads);
+    Rcpp::traits::input_parameter< const int >::type nthreads(nthreadsSEXP);
+    rcpp_fraq_run_r(input, kernel, limit, nthreads);
+    return R_NilValue;
+END_RCPP
+}
+// loaded_in_fork_child
+void loaded_in_fork_child(const bool value);
+RcppExport SEXP _fraq_loaded_in_fork_child(SEXP valueSEXP) {
+BEGIN_RCPP
+    Rcpp::traits::input_parameter< const bool >::type value(valueSEXP);
+    loaded_in_fork_child(value);
     return R_NilValue;
 END_RCPP
 }
@@ -246,6 +255,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fraq_rcpp_fraq_slice", (DL_FUNC) &_fraq_rcpp_fraq_slice, 5},
     {"_fraq_rcpp_fraq_convert", (DL_FUNC) &_fraq_rcpp_fraq_convert, 3},
     {"_fraq_rcpp_fraq_run_r", (DL_FUNC) &_fraq_rcpp_fraq_run_r, 4},
+    {"_fraq_loaded_in_fork_child", (DL_FUNC) &_fraq_loaded_in_fork_child, 1},
     {"_fraq_rcpp_fraq_chunk", (DL_FUNC) &_fraq_rcpp_fraq_chunk, 5},
     {"_fraq_rcpp_fraq_concat", (DL_FUNC) &_fraq_rcpp_fraq_concat, 3},
     {"_fraq_rcpp_fraq_count_barcodes", (DL_FUNC) &_fraq_rcpp_fraq_count_barcodes, 5},

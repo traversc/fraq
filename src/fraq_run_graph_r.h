@@ -130,7 +130,11 @@ inline ProcessedBlockPtr r_kernel_result_to_processed(SEXP result,
   }
 
   Rcpp::List output(result);
-  Rcpp::CharacterVector output_names = output.names();
+  SEXP output_names_sexp = Rf_getAttrib(output, R_NamesSymbol);
+  if (Rf_isNull(output_names_sexp) || TYPEOF(output_names_sexp) != STRSXP) {
+    Rcpp::stop("fraq_run_r kernel must return a named list of data frames");
+  }
+  Rcpp::CharacterVector output_names(output_names_sexp);
   if (output_names.size() != output.size()) {
     Rcpp::stop("fraq_run_r kernel must return a named list of data frames");
   }
@@ -188,7 +192,7 @@ struct FraqRunGraphR {
 
   std::unordered_map<size_t, BlockPtrVec> read_blocks;
   function_node<BlockPtr, continue_msg> joiner_node;
-  tbb::concurrent_queue<BlockPtrVec> kernel_queue;
+  sequencer_node<BlockPtrVec> kernel_queue;
 
   sequencer_node<ProcessedBlockPtr> reorder_node;
 
@@ -220,6 +224,11 @@ struct FraqRunGraphR {
     ),
     joiner_node(flow_graph, serial,
       [this](const BlockPtr &b) { return this->joiner_node_body(b); }
+    ),
+    kernel_queue(flow_graph,
+      [](const BlockPtrVec &b) -> size_t {
+        return b.blocks[0]->index;
+      }
     ),
     reorder_node(flow_graph,
       [](const ProcessedBlockPtr &p) { return p->index; }
@@ -269,7 +278,7 @@ struct FraqRunGraphR {
   }
 
   bool try_pop_kernel_block(BlockPtrVec &b) {
-    return kernel_queue.try_pop(b);
+    return kernel_queue.try_get(b);
   }
 
   void submit_processed_block(const ProcessedBlockPtr &p) {
@@ -455,7 +464,12 @@ struct FraqRunGraphR {
     if(it->second.full()) {
       BlockPtrVec to_process = std::move(it->second);
       read_blocks.erase(it);
-      kernel_queue.push(std::move(to_process));
+      if (to_process.blocks.empty() || !to_process.blocks[0]) {
+        throw std::runtime_error("Internal error: invalid R kernel block sequence");
+      }
+      if (!kernel_queue.try_put(to_process)) {
+        throw std::runtime_error("Internal error: failed to enqueue R kernel block");
+      }
     }
     return continue_msg();
   }

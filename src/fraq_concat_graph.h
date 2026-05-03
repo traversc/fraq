@@ -1,5 +1,5 @@
-#ifndef _FRAQ_CONCAT_H
-#define _FRAQ_CONCAT_H
+#ifndef _FRAQ_CONCAT_GRAPH_H_
+#define _FRAQ_CONCAT_GRAPH_H_
 
 #include <algorithm>
 #include <iterator>
@@ -250,4 +250,4 @@ struct FraqConcatGraph {
 
 } // namespace fraq_internal
 
-#endif // _FRAQ_CONCAT_H
+#endif // _FRAQ_CONCAT_GRAPH_H_

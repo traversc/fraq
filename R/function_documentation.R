@@ -119,8 +119,9 @@ fraq_convert <- function(input, output, nthreads = 1L) {
 
 #' Run an R kernel over sequencing reads
 #'
-#' @description Run an R function over blocks of FASTQ records while fraq
-#' keeps file I/O and compression work on background TBB threads.
+#' @description Run an R function over blocks of FASTQ records. With
+#' `nthreads > 1`, fraq keeps file I/O and compression work on background TBB
+#' threads; with `nthreads = 1` or after fork, it uses a serial path.
 #'
 #' @param input Character vector of source files/keys.
 #' @param kernel Function called as `kernel(reads, index)`. `reads` is a named
@@ -129,17 +130,22 @@ fraq_convert <- function(input, output, nthreads = 1L) {
 #' for the rows in each data frame.
 #' @param limit Optional non-negative whole-number scalar limiting processing
 #' to the first `limit` record indices. `NULL` means no limit.
-#' @param io_threads Integer number of threads for background reading, joining,
-#' compression, and writing. For paired-end inputs, values above 4 usually
-#' provide little additional benefit.
+#' @param nthreads Integer number of threads. When `nthreads = 1`, or when fraq
+#' is running inside a forked R process, fraq uses a serial path that does not
+#' construct a TBB graph. For paired-end inputs, values above 4 usually provide
+#' little additional benefit.
 #'
 #' @details
 #' The kernel must return `NULL` or a named list of data frames. Each list name
 #' is an output path or `.mem` key, and each data frame must contain character
 #' columns `name`, `seq`, and `qual`.
 #'
-#' The R kernel runs only on the calling R thread. Background threads are used
-#' for reading, joining, demultiplexing, compression, and writing.
+#' The R kernel runs only on the calling R thread. When `nthreads > 1`,
+#' background threads are used for reading, joining, demultiplexing,
+#' compression, and writing.
+#'
+#' Blocks are delivered to the R kernel in increasing block-index order. Within
+#' each call, `index` is an increasing vector of zero-based read indices.
 #'
 #' Do not use `parallel::mclapply()` inside the kernel. It forks the R process
 #' on Unix-like systems, and forking while fraq has active background threads can
@@ -164,9 +170,9 @@ fraq_convert <- function(input, output, nthreads = 1L) {
 #'     output
 #' }
 #'
-#' fraq_run_r(input_paths, even_read_kernel, io_threads = 2L)
+#' fraq_run_r(input_paths, even_read_kernel, nthreads = 2L)
 #' @export
-fraq_run_r <- function(input, kernel, limit = NULL, io_threads = 1L) {
+fraq_run_r <- function(input, kernel, limit = NULL, nthreads = 1L) {
     if (!length(input)) {
         stop("`input` must contain at least one file path or .mem key.")
     }
@@ -189,7 +195,7 @@ fraq_run_r <- function(input, kernel, limit = NULL, io_threads = 1L) {
     }
     limit_val <- if (is.null(limit)) 0 else as.numeric(limit)
     input <- normalizePath(input, winslash = "/", mustWork = FALSE)
-    rcpp_fraq_run_r(input, kernel, limit_val, as.integer(io_threads))
+    rcpp_fraq_run_r(input, kernel, limit_val, as.integer(nthreads))
     invisible(NULL)
 }
 

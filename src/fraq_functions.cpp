@@ -3,7 +3,10 @@
 #include "fraq_defines.h"
 #include "fraq_run_graph.h"
 #include "fraq_run_graph_r.h"
-#include "fraq_concat.h"
+#include "fraq_run_serial.h"
+#include "fraq_concat_serial.h"
+#include "fraq_nthreads_guard.h"
+#include "fraq_concat_graph.h"
 #include "distance_functions.h"
 
 #include <algorithm>
@@ -12,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <exception>
+#include <memory>
 #include <thread>
 #include <unordered_set>
 #include <tbb/global_control.h>
@@ -32,7 +36,7 @@ int rcpp_fraq_options(const std::string &option, const int value, const bool set
 void rcpp_fraq_downsample(std::vector<std::string> input, const std::vector<std::string> &output, const double amount, const int nthreads);
 void rcpp_fraq_slice(std::vector<std::string> input, const std::vector<std::string> &output, const double limit, const std::vector<double> &select, const int nthreads);
 void rcpp_fraq_convert(std::vector<std::string> input, const std::vector<std::string> &output, const int nthreads);
-void rcpp_fraq_run_r(std::vector<std::string> input, Rcpp::Function kernel, const size_t limit, const int io_threads);
+void rcpp_fraq_run_r(std::vector<std::string> input, Rcpp::Function kernel, const size_t limit, const int nthreads);
 void rcpp_fraq_chunk(std::vector<std::string> input, const std::vector<std::string> &output_prefix, const std::string &output_suffix, const double chunk_size, const int nthreads);
 void rcpp_fraq_concat(const std::vector<std::string> &input, const std::string &output, const int nthreads);
 DataFrame rcpp_fraq_count_barcodes(const std::vector<std::string> &input, const std::vector<std::string> &barcodes, const int max_distance, const bool allow_revcomp, const int nthreads);
@@ -45,6 +49,7 @@ void rcpp_fraq_wait(std::vector<std::string> input, const std::vector<std::strin
 DataFrame rcpp_fraq_align(CharacterVector query, CharacterVector target, int max_distance, std::string ambiguity_base, std::string boundary, std::string distance_metric);
 DataFrame rcpp_fraq_mem_list();
 bool rcpp_fraq_mem_remove(const std::string &mem_key);
+void loaded_in_fork_child(const bool value);
 
 // global variables, set using fraq_options()
 // max allowed value of 2^16-1 = 65535
@@ -77,6 +82,21 @@ static bool interrupt_r_check(void* ctx) {
     return true;
   }
   return false;
+}
+
+static void report_excess_readers(const std::vector<size_t> &excess,
+                                  const char *caller) {
+  if (excess.empty()) {
+    return;
+  }
+  Rcpp::Rcerr << caller << " detected excess reads from inputs: ";
+  bool first = true;
+  for (size_t idx : excess) {
+    if (!first) Rcpp::Rcerr << ", ";
+    Rcpp::Rcerr << idx;
+    first = false;
+  }
+  Rcpp::Rcerr << std::endl;
 }
 
 // Helper used by multiple kernels to compute the best overlap length
@@ -121,32 +141,25 @@ static size_t fraq_calculate_overlap(const std::string &seq1,
 // functions exported to C++
 
 void fraq_run(const std::vector<std::string> &input_files, fraq::process_task_t task, int nthreads = 1, fraq::FraqRunConfig config = fraq::FraqRunConfig{}) {
-  if (nthreads <= 1) {
-    nthreads = 1;
-  }
+  const int thread_count = fraq_internal::normalize_nthreads(nthreads);
   InterruptState interrupt_state;
   interrupt_state.main_thread_id = std::this_thread::get_id();
   config.interrupt_fn = interrupt_r_check;
   config.interrupt_ctx = &interrupt_state;
-  tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, nthreads);
-  fraq_internal::FraqRunGraph fg(input_files, task, config, mem_store);
-  fg.wait_and_flush();
+  std::vector<size_t> excess;
+  if (thread_count <= 1) {
+    excess = fraq_internal::serial_fraq_run(input_files, task, config, mem_store);
+  } else {
+    tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, thread_count);
+    fraq_internal::FraqRunGraph fg(input_files, task, config, mem_store);
+    fg.wait_and_flush();
+    excess = fg.check_reader_balance();
+  }
   if (interrupt_state.exception) {
     Rcpp::warning("fraq interrupted");
     std::rethrow_exception(interrupt_state.exception);
-  } else {
-    auto excess = fg.check_reader_balance();
-    if (!excess.empty()) {
-      Rcpp::Rcerr << "fraq_run detected excess reads from inputs: ";
-      bool first = true;
-      for (size_t idx : excess) {
-        if (!first) Rcpp::Rcerr << ", ";
-        Rcpp::Rcerr << idx;
-        first = false;
-      }
-      Rcpp::Rcerr << std::endl;
-    }
   }
+  report_excess_readers(excess, "fraq_run");
 }
 
 inline void fraq_concat(const std::vector<std::string> &input_files,
@@ -159,7 +172,12 @@ inline void fraq_concat(const std::vector<std::string> &input_files,
   if (output_file.empty()) {
     throw std::runtime_error("fraq_concat output path must be non-empty");
   }
-  tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, nthreads);
+  const int thread_count = fraq_internal::normalize_nthreads(nthreads);
+  if (thread_count <= 1) {
+    fraq_internal::serial_fraq_concat(input_files, output_file, config, mem_store);
+    return;
+  }
+  tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, thread_count);
   const bool is_fraq_output = ends_with(output_file, ".fraq") || ends_with(output_file, ".mem");
   if (is_fraq_output) {
     fraq_internal::FraqConcatGraph fg(input_files, config, mem_store, output_file);
@@ -310,60 +328,61 @@ void rcpp_fraq_convert(std::vector<std::string> input, const std::vector<std::st
 void rcpp_fraq_run_r(std::vector<std::string> input,
                      Rcpp::Function kernel,
                      const size_t limit = 0,
-                     const int io_threads = 1) {
+                     const int nthreads = 1) {
   if (input.empty()) {
     throw std::runtime_error("input must be a character vector of length > 0");
   }
-  int thread_count = io_threads <= 1 ? 1 : io_threads;
+  const int thread_count = fraq_internal::normalize_nthreads(nthreads);
   InterruptState interrupt_state;
   interrupt_state.main_thread_id = std::this_thread::get_id();
   auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, true, limit);
   config.interrupt_fn = interrupt_r_check;
   config.interrupt_ctx = &interrupt_state;
 
-  tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, thread_count);
-  fraq_internal::FraqRunGraphR fg(input, config, mem_store);
+  std::vector<size_t> excess;
+  if (thread_count <= 1) {
+    excess = fraq_internal::serial_fraq_run_r(input, kernel, config, mem_store);
+  } else {
+    tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, thread_count);
+    fraq_internal::FraqRunGraphR fg(input, config, mem_store);
 
-  try {
-    while (true) {
-      Rcpp::checkUserInterrupt();
-      fraq_internal::BlockPtrVec block;
-      if (!fg.try_pop_kernel_block(block)) {
-        fg.wait_for_idle();
-        if (!fg.try_pop_kernel_block(block)) {
-          break;
-        }
-      }
-      fraq_internal::ProcessedBlockPtr processed = fraq_internal::r_kernel_process_block(block, kernel, config);
-      fg.submit_processed_block(processed);
-    }
-    fg.wait_and_flush();
-  } catch (...) {
-    std::exception_ptr original = std::current_exception();
-    fg.request_interrupt();
     try {
+      while (true) {
+        Rcpp::checkUserInterrupt();
+        fraq_internal::BlockPtrVec block;
+        if (!fg.try_pop_kernel_block(block)) {
+          fg.wait_for_idle();
+          if (!fg.try_pop_kernel_block(block)) {
+            break;
+          }
+        }
+        fraq_internal::ProcessedBlockPtr processed = fraq_internal::r_kernel_process_block(block, kernel, config);
+        fg.submit_processed_block(processed);
+      }
       fg.wait_and_flush();
     } catch (...) {
+      std::exception_ptr original = std::current_exception();
+      fg.request_interrupt();
+      try {
+        fg.wait_and_flush();
+      } catch (...) {
+      }
+      std::rethrow_exception(original);
     }
-    std::rethrow_exception(original);
+    excess = fg.check_reader_balance();
   }
 
   if (interrupt_state.exception) {
     Rcpp::warning("fraq interrupted");
     std::rethrow_exception(interrupt_state.exception);
   } else {
-    auto excess = fg.check_reader_balance();
-    if (!excess.empty()) {
-      Rcpp::Rcerr << "fraq_run_r detected excess reads from inputs: ";
-      bool first = true;
-      for (size_t idx : excess) {
-        if (!first) Rcpp::Rcerr << ", ";
-        Rcpp::Rcerr << idx;
-        first = false;
-      }
-      Rcpp::Rcerr << std::endl;
-    }
+    report_excess_readers(excess, "fraq_run_r");
   }
+}
+
+// [[Rcpp::export(rng=false)]]
+void loaded_in_fork_child(const bool value) {
+  fraq_internal::loaded_in_fork_child_internal(value);
 }
 
 // [[Rcpp::export(rng=false)]]
@@ -422,8 +441,13 @@ DataFrame rcpp_fraq_count_barcodes(const std::vector<std::string> &input,
   if(barcodes.size() == 0) throw(std::runtime_error("barcodes must be a character vector of length > 0"));
   if(max_distance < 0) throw(std::runtime_error("max_distance must be non-negative"));
 
-  // per thread barcode counts
-  tbb::enumerable_thread_specific<std::unordered_map<std::string, uint64_t>> count_maps;
+  const int thread_count = fraq_internal::normalize_nthreads(nthreads);
+  using CountMap = std::unordered_map<std::string, uint64_t>;
+  CountMap serial_counts;
+  std::unique_ptr<tbb::enumerable_thread_specific<CountMap>> count_maps;
+  if (thread_count > 1) {
+    count_maps = std::make_unique<tbb::enumerable_thread_specific<CountMap>>();
+  }
 
   std::vector<std::string> barcodes_revcomp(barcodes.size());
   std::transform(barcodes.begin(), barcodes.end(), barcodes_revcomp.begin(), fraq::reverse_complement);
@@ -433,7 +457,7 @@ DataFrame rcpp_fraq_count_barcodes(const std::vector<std::string> &input,
     return bc.size() <= seq.size() && fraq_hm_contains(bc, seq, max_distance).distance <= max_distance;
   };
   auto count_barcodes_task = [&](input_t reads, size_t index) -> output_t {
-    std::unordered_map<std::string, uint64_t> &local_map = count_maps.local();
+    CountMap &local_map = count_maps ? count_maps->local() : serial_counts;
     std::string bc_match;
     for(size_t i= 0; i < barcodes.size(); ++i) {
       const std::string &barcode = barcodes[i];
@@ -463,13 +487,19 @@ DataFrame rcpp_fraq_count_barcodes(const std::vector<std::string> &input,
   };
   {
     auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false);
-    fraq_run(input, count_barcodes_task, nthreads, config);
+    fraq_run(input, count_barcodes_task, thread_count, config);
   }
 
   // Combine results from all threads
   std::unordered_map<std::string, uint64_t> total_counts;
-  for (const auto &local_map : count_maps) {
-    for (const auto &pair : local_map) {
+  if (count_maps) {
+    for (const auto &local_map : *count_maps) {
+      for (const auto &pair : local_map) {
+        total_counts[pair.first] += pair.second;
+      }
+    }
+  } else {
+    for (const auto &pair : serial_counts) {
       total_counts[pair.first] += pair.second;
     }
   }
@@ -650,7 +680,12 @@ Rcpp::List rcpp_fraq_merge_pairs(const std::vector<std::string> &input,
     double sum_mismatch_rate = 0.0;
   };
 
-  tbb::enumerable_thread_specific<MergeStats> stats_tls;
+  const int thread_count = fraq_internal::normalize_nthreads(nthreads);
+  MergeStats serial_stats;
+  std::unique_ptr<tbb::enumerable_thread_specific<MergeStats>> stats_tls;
+  if (thread_count > 1) {
+    stats_tls = std::make_unique<tbb::enumerable_thread_specific<MergeStats>>();
+  }
 
   auto reverse_quality = [](const std::string &qual) {
     std::string out = qual;
@@ -662,7 +697,7 @@ Rcpp::List rcpp_fraq_merge_pairs(const std::vector<std::string> &input,
     if (reads.size() != 2) {
       throw std::runtime_error("fraq_merge_pairs expects exactly 2 reads per record");
     }
-    MergeStats &local = stats_tls.local();
+    MergeStats &local = stats_tls ? stats_tls->local() : serial_stats;
     const fraq::Read &r1 = reads[0];
     const fraq::Read &r2 = reads[1];
 
@@ -771,16 +806,20 @@ Rcpp::List rcpp_fraq_merge_pairs(const std::vector<std::string> &input,
   };
 
   auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false);
-  fraq_run(input, merge_task, nthreads, config);
+  fraq_run(input, merge_task, thread_count, config);
 
   MergeStats total_stats;
-  for (const auto &s : stats_tls) {
-    total_stats.merged += s.merged;
-    total_stats.unmerged += s.unmerged;
-    total_stats.sum_insert += s.sum_insert;
-    total_stats.sumsq_insert += s.sumsq_insert;
-    total_stats.sum_overlap += s.sum_overlap;
-    total_stats.sum_mismatch_rate += s.sum_mismatch_rate;
+  if (stats_tls) {
+    for (const auto &s : *stats_tls) {
+      total_stats.merged += s.merged;
+      total_stats.unmerged += s.unmerged;
+      total_stats.sum_insert += s.sum_insert;
+      total_stats.sumsq_insert += s.sumsq_insert;
+      total_stats.sum_overlap += s.sum_overlap;
+      total_stats.sum_mismatch_rate += s.sum_mismatch_rate;
+    }
+  } else {
+    total_stats = serial_stats;
   }
 
   double mean_insert = total_stats.merged ? (total_stats.sum_insert / static_cast<double>(total_stats.merged)) : NA_REAL;
@@ -816,9 +855,15 @@ DataFrame rcpp_fraq_trim_adapters(const std::vector<std::string> &input,
   if(adapters.size() == 0) throw(std::runtime_error("adapters must be a character vector of length > 0"));
   if(max_distance < 0) throw(std::runtime_error("max_distance must be non-negative"));
 
-  tbb::enumerable_thread_specific<std::unordered_map<std::string, uint64_t>> count_maps;
+  const int thread_count = fraq_internal::normalize_nthreads(nthreads);
+  using CountMap = std::unordered_map<std::string, uint64_t>;
+  CountMap serial_counts;
+  std::unique_ptr<tbb::enumerable_thread_specific<CountMap>> count_maps;
+  if (thread_count > 1) {
+    count_maps = std::make_unique<tbb::enumerable_thread_specific<CountMap>>();
+  }
   auto trim_task = [&](input_t reads, size_t index) -> output_t {
-    std::unordered_map<std::string, uint64_t> &local_map = count_maps.local();
+    CountMap &local_map = count_maps ? count_maps->local() : serial_counts;
     for(auto & adapter : adapters) {
       auto res = fraq_hm_starts(adapter, reads[0].seq, max_distance);
       if(res.distance <= max_distance) {
@@ -838,13 +883,19 @@ DataFrame rcpp_fraq_trim_adapters(const std::vector<std::string> &input,
   };
   {
     auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false);
-    fraq_run(input, trim_task, nthreads, config);
+    fraq_run(input, trim_task, thread_count, config);
   }
 
   // Combine results from all threads
   std::unordered_map<std::string, uint64_t> total_counts;
-  for (const auto &local_map : count_maps) {
-    for (const auto &pair : local_map) {
+  if (count_maps) {
+    for (const auto &local_map : *count_maps) {
+      for (const auto &pair : local_map) {
+        total_counts[pair.first] += pair.second;
+      }
+    }
+  } else {
+    for (const auto &pair : serial_counts) {
       total_counts[pair.first] += pair.second;
     }
   }
@@ -932,15 +983,25 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
         }
     };
 
-    tbb::enumerable_thread_specific<Accum> acc1_tls;
-    tbb::enumerable_thread_specific<Accum> acc2_tls;
-    tbb::enumerable_thread_specific<std::unordered_map<int, uint64_t>> insert_tls;
+    const int thread_count = fraq_internal::normalize_nthreads(nthreads);
+    Accum acc1_serial;
+    Accum acc2_serial;
+    std::unordered_map<int, uint64_t> insert_serial;
+    std::unique_ptr<tbb::enumerable_thread_specific<Accum>> acc1_tls;
+    std::unique_ptr<tbb::enumerable_thread_specific<Accum>> acc2_tls;
+    std::unique_ptr<tbb::enumerable_thread_specific<std::unordered_map<int, uint64_t>>> insert_tls;
+    if (thread_count > 1) {
+        acc1_tls = std::make_unique<tbb::enumerable_thread_specific<Accum>>();
+        acc2_tls = std::make_unique<tbb::enumerable_thread_specific<Accum>>();
+        insert_tls = std::make_unique<tbb::enumerable_thread_specific<std::unordered_map<int, uint64_t>>>();
+    }
 
     auto summary_task_single = [&](input_t reads, size_t /*read_index*/) -> fraq::output_t {
         if (reads.size() != 1) {
             throw std::runtime_error("rcpp_fraq_summary(single-end): expected batches of size 1");
         }
-        acc1_tls.local().process_read(reads[0], phred33);
+        Accum &acc1 = acc1_tls ? acc1_tls->local() : acc1_serial;
+        acc1.process_read(reads[0], phred33);
         return {};
     };
 
@@ -948,8 +1009,10 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
         if (reads.size() != 2) {
             throw std::runtime_error("rcpp_fraq_summary(paired-end): expected batches of size 2");
         }
-        acc1_tls.local().process_read(reads[0], phred33);
-        acc2_tls.local().process_read(reads[1], phred33);
+        Accum &acc1 = acc1_tls ? acc1_tls->local() : acc1_serial;
+        Accum &acc2 = acc2_tls ? acc2_tls->local() : acc2_serial;
+        acc1.process_read(reads[0], phred33);
+        acc2.process_read(reads[1], phred33);
 
         const std::string &s1 = reads[0].seq;
         const std::string &s2 = reads[1].seq;
@@ -959,7 +1022,8 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
             size_t ov = fraq_calculate_overlap(s1, s2rc, min_overlap, max_mismatch_rate, dummy_mismatches, false);
             if (ov > 0) {
                 int ins = static_cast<int>(s1.size() + s2.size() - ov);
-                insert_tls.local()[ins] += 1;
+                auto &insert_map = insert_tls ? insert_tls->local() : insert_serial;
+                insert_map[ins] += 1;
             }
         }
         return {};
@@ -967,10 +1031,10 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
 
     if (input.size() == 1) {
         auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false, limit);
-        fraq_run(input, summary_task_single, nthreads, config);
+        fraq_run(input, summary_task_single, thread_count, config);
     } else {
         auto config = fraq::FraqRunConfig(BLOCKSIZE, FRAQ_COMPRESS_LEVEL, ZSTD_COMPRESS_LEVEL, GZIP_COMPRESS_LEVEL, false, limit);
-        fraq_run(input, summary_task_paired, nthreads, config);
+        fraq_run(input, summary_task_paired, thread_count, config);
     }
 
     auto merge_accum = [](const tbb::enumerable_thread_specific<Accum> &tls) -> Accum {
@@ -999,14 +1063,18 @@ Rcpp::List rcpp_fraq_summary(const std::vector<std::string> &input,
         return out;
     };
 
-    Accum A1 = merge_accum(acc1_tls);
+    Accum A1 = acc1_tls ? merge_accum(*acc1_tls) : acc1_serial;
     Accum A2;
-    if (input.size() == 2) A2 = merge_accum(acc2_tls);
+    if (input.size() == 2) A2 = acc2_tls ? merge_accum(*acc2_tls) : acc2_serial;
 
     std::unordered_map<int, uint64_t> insert_hist;
     if (input.size() == 2) {
-        for (const auto &im : insert_tls) {
-            for (const auto &kv : im) insert_hist[kv.first] += kv.second;
+        if (insert_tls) {
+            for (const auto &im : *insert_tls) {
+                for (const auto &kv : im) insert_hist[kv.first] += kv.second;
+            }
+        } else {
+            insert_hist = std::move(insert_serial);
         }
     }
 

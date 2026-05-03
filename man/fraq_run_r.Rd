@@ -4,7 +4,7 @@
 \alias{fraq_run_r}
 \title{Run an R kernel over sequencing reads}
 \usage{
-fraq_run_r(input, kernel, limit = NULL, io_threads = 1L)
+fraq_run_r(input, kernel, limit = NULL, nthreads = 1L)
 }
 \arguments{
 \item{input}{Character vector of source files/keys.}
@@ -17,24 +17,30 @@ for the rows in each data frame.}
 \item{limit}{Optional non-negative whole-number scalar limiting processing
 to the first \code{limit} record indices. \code{NULL} means no limit.}
 
-\item{io_threads}{Integer number of threads for background reading, joining,
-compression, and writing. For paired-end inputs, values above 4 usually
-provide little additional benefit.}
+\item{nthreads}{Integer number of threads. When \code{nthreads = 1}, or when fraq
+is running inside a forked R process, fraq uses a serial path that does not
+construct a TBB graph. For paired-end inputs, values above 4 usually provide
+little additional benefit.}
 }
 \value{
 Invisibly returns \code{NULL} after all outputs are written.
 }
 \description{
-Run an R function over blocks of FASTQ records while fraq
-keeps file I/O and compression work on background TBB threads.
+Run an R function over blocks of FASTQ records. With
+\code{nthreads > 1}, fraq keeps file I/O and compression work on background TBB
+threads; with \code{nthreads = 1} or after fork, it uses a serial path.
 }
 \details{
 The kernel must return \code{NULL} or a named list of data frames. Each list name
 is an output path or \code{.mem} key, and each data frame must contain character
 columns \code{name}, \code{seq}, and \code{qual}.
 
-The R kernel runs only on the calling R thread. Background threads are used
-for reading, joining, demultiplexing, compression, and writing.
+The R kernel runs only on the calling R thread. When \code{nthreads > 1},
+background threads are used for reading, joining, demultiplexing,
+compression, and writing.
+
+Blocks are delivered to the R kernel in increasing block-index order. Within
+each call, \code{index} is an increasing vector of zero-based read indices.
 
 Do not use \code{parallel::mclapply()} inside the kernel. It forks the R process
 on Unix-like systems, and forking while fraq has active background threads can
@@ -58,5 +64,5 @@ even_read_kernel <- function(reads, index) {
     output
 }
 
-fraq_run_r(input_paths, even_read_kernel, io_threads = 2L)
+fraq_run_r(input_paths, even_read_kernel, nthreads = 2L)
 }

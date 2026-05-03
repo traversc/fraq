@@ -78,7 +78,7 @@ fraq_run_r(
         seen_indices <<- c(seen_indices, index)
         stats::setNames(list(reads[[1]]), single_out)
     },
-    io_threads = 2L
+    nthreads = 2L
 )
 
 stopifnot(identical(as.integer(seen_indices), seq_along(single_records) - 1L))
@@ -92,7 +92,7 @@ fraq_run_r(
         drop_indices <<- c(drop_indices, index)
         NULL
     },
-    io_threads = 2L
+    nthreads = 2L
 )
 stopifnot(identical(as.integer(drop_indices), seq_along(single_records) - 1L))
 
@@ -105,7 +105,7 @@ fraq_run_r(
         NULL
     },
     limit = 0L,
-    io_threads = 2L
+    nthreads = 2L
 )
 stopifnot(!zero_called)
 
@@ -128,7 +128,7 @@ fraq_run_r(
         )
     },
     limit = 5L,
-    io_threads = 2L
+    nthreads = 2L
 )
 
 expected_keep <- c(1L, 3L, 5L)
@@ -151,7 +151,7 @@ fraq_run_r(
             c(even_out, odd_out)
         )
     },
-    io_threads = 2L
+    nthreads = 2L
 )
 
 stopifnot(identical(read_fastq_records(even_out), single_records[c(1L, 3L, 5L, 7L)]))
@@ -165,7 +165,7 @@ fraq_run_r(
     function(reads, index) {
         stats::setNames(list(reads[[1]]), mem_key)
     },
-    io_threads = 2L
+    nthreads = 2L
 )
 fraq_convert(mem_key, mem_back, nthreads = 2L)
 stopifnot(identical(read_fastq_records(mem_back), single_records))
@@ -178,7 +178,7 @@ expect_error_message(
         function(reads, index) {
             list(reads[[1]])
         },
-        io_threads = 2L
+        nthreads = 2L
     ),
     "named list"
 )
