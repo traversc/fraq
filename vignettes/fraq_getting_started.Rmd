@@ -360,7 +360,8 @@ data is decoded and encoded.
   zstd so it is both more storage-efficient and faster to stream than textual
   FASTQ.
 - `.mem` - In-memory `.fraq` (read/write). Lifetime is limited to the current
-  R session.
+  R session. `.mem` values are exact in-memory keys, not filesystem paths, so
+  they are not normalized or expanded.
 - `.fifo` - POSIX named pipes on Linux/macOS (read/write). Useful for
   streaming data between CLI programs.
 
@@ -407,7 +408,8 @@ An R kernel is called as `kernel(reads, index)`:
 - Return `NULL` to drop the whole block.
 - Return a named list of data frames to write reads. Each list name is an
   output path or `.mem` key, and each data frame must contain `name`, `seq`,
-  and `qual` columns.
+  and `qual` columns. Output paths returned by an R kernel are normalized by
+  the R wrapper; `.mem` keys are used exactly as returned.
 
 Vectorized R kernels can still perform well on large FASTQ datasets because
 they operate on full blocks rather than one read at a time.

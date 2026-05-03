@@ -329,7 +329,8 @@ controls how data is decoded and encoded.
   block-compressed format layered on top of bundled zstd so it is both
   more storage-efficient and faster to stream than textual FASTQ.
 - `.mem` - In-memory `.fraq` (read/write). Lifetime is limited to the
-  current R session.
+  current R session. `.mem` values are exact in-memory keys, not
+  filesystem paths, so they are not normalized or expanded.
 - `.fifo` - POSIX named pipes on Linux/macOS (read/write). Useful for
   streaming data between CLI programs.
 
@@ -356,9 +357,14 @@ path, described below.
 
 You can build a custom kernel with `fraq_run_r()`. The R function runs
 on the main R thread rather than inside a TBB graph node, so it is safe
-for it to work with R objects and call back into R. IO happens o
-background threads (determined by `io_threads`) while the R kernel stays
-on the main R thread.
+for it to work with R objects and call back into R. When `nthreads > 1`,
+IO happens on background threads while the R kernel stays on the main R
+thread. When `nthreads = 1`, or when fraq detects that it is running
+inside a forked R process, fraq uses a serial path that does not
+construct a TBB graph.
+
+Blocks are delivered to the R kernel in increasing block-index order,
+and the `index` vector within each call is increasing.
 
 An R kernel is called as `kernel(reads, index)`:
 
@@ -371,8 +377,9 @@ An R kernel is called as `kernel(reads, index)`:
   or joining back to external metadata.
 - Return `NULL` to drop the whole block.
 - Return a named list of data frames to write reads. Each list name is
-  an output path, and each data frame must contain `name`, `seq`, and
-  `qual` columns.
+  an output path or `.mem` key, and each data frame must contain `name`,
+  `seq`, and `qual` columns. Output paths returned by an R kernel are
+  normalized by the R wrapper; `.mem` keys are used exactly as returned.
 
 Vectorized R kernels can still perform well on large FASTQ datasets
 because they operate on full blocks rather than one read at a time.
@@ -395,7 +402,7 @@ even_read_kernel <- function(reads, index) {
 fraq_run_r(
     input_paths,
     even_read_kernel,
-    io_threads = 2L
+    nthreads = 2L
 )
 ```
 
@@ -519,10 +526,10 @@ fraq_options("zstd_compress_level", 6L)
 fraq_options("gzip_compress_level", 4L)
 ```
 
-Most kernels accept `nthreads`. Internally, fraq caps the TBB scheduler
-to the requested parallelism. `fraq_run_r()` uses `io_threads` instead
-because the R kernel itself runs on the main R thread; the setting only
-controls background read, join, compression, and write work.
+Most kernels accept `nthreads`. With `nthreads = 1`, fraq uses a serial
+path. With `nthreads > 1`, fraq caps the TBB scheduler to the requested
+parallelism. If fraq detects that it is running inside a forked R
+process, it forces `nthreads = 1` to avoid using TBB after `fork()`.
 
 ## FRAQ file format
 

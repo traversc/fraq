@@ -23,6 +23,20 @@ fraq_options <- function(option, value = NULL) {
     }
 }
 
+fraq_normalize_path_or_key <- function(x) {
+    if (!length(x)) {
+        return(x)
+    }
+    is_mem_key <- !is.na(x) & endsWith(x, ".mem")
+    normalize <- !is.na(x) & !is_mem_key
+    x[normalize] <- normalizePath(
+        x[normalize],
+        winslash = "/",
+        mustWork = FALSE
+    )
+    x
+}
+
 
 #' Downsample FASTQ file(s)
 #'
@@ -52,8 +66,8 @@ fraq_options <- function(option, value = NULL) {
 #' fraq_downsample(c(r1, r2), out, amount = 0.1)
 #' @export
 fraq_downsample <- function(input, output, amount, nthreads = 1L) {
-    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
-    output <- normalizePath(output, winslash = "/", mustWork = FALSE)
+    input <- fraq_normalize_path_or_key(input)
+    output <- fraq_normalize_path_or_key(output)
     rcpp_fraq_downsample(input, output, amount, as.integer(nthreads))
     invisible(NULL)
 }
@@ -81,8 +95,8 @@ fraq_concat <- function(input, output, nthreads = 1L) {
     if (length(output) != 1L) {
         stop("output must be a single file path or .mem key")
     }
-    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
-    output <- normalizePath(output, winslash = "/", mustWork = FALSE)
+    input <- fraq_normalize_path_or_key(input)
+    output <- fraq_normalize_path_or_key(output)
     rcpp_fraq_concat(input, output, as.integer(nthreads))
     invisible(NULL)
 }
@@ -111,8 +125,8 @@ fraq_convert <- function(input, output, nthreads = 1L) {
     if (length(input) != length(output)) {
         stop("input and output must have the same length")
     }
-    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
-    output <- normalizePath(output, winslash = "/", mustWork = FALSE)
+    input <- fraq_normalize_path_or_key(input)
+    output <- fraq_normalize_path_or_key(output)
     rcpp_fraq_convert(input, output, as.integer(nthreads))
     invisible(NULL)
 }
@@ -138,7 +152,8 @@ fraq_convert <- function(input, output, nthreads = 1L) {
 #' @details
 #' The kernel must return `NULL` or a named list of data frames. Each list name
 #' is an output path or `.mem` key, and each data frame must contain character
-#' columns `name`, `seq`, and `qual`.
+#' columns `name`, `seq`, and `qual`. Output paths are normalized before
+#' writing; `.mem` keys are exact in-memory identifiers and are not normalized.
 #'
 #' The R kernel runs only on the calling R thread. When `nthreads > 1`,
 #' background threads are used for reading, joining, demultiplexing,
@@ -194,8 +209,23 @@ fraq_run_r <- function(input, kernel, limit = NULL, nthreads = 1L) {
         }
     }
     limit_val <- if (is.null(limit)) 0 else as.numeric(limit)
-    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
-    rcpp_fraq_run_r(input, kernel, limit_val, as.integer(nthreads))
+    input <- fraq_normalize_path_or_key(input)
+    normalized_kernel <- function(reads, index) {
+        output <- kernel(reads, index)
+        if (is.null(output) || !is.list(output) || is.data.frame(output)) {
+            return(output)
+        }
+        output_names <- names(output)
+        if (!is.null(output_names)) {
+            valid_names <- !is.na(output_names) & nzchar(output_names)
+            output_names[valid_names] <- fraq_normalize_path_or_key(
+                output_names[valid_names]
+            )
+            names(output) <- output_names
+        }
+        output
+    }
+    rcpp_fraq_run_r(input, normalized_kernel, limit_val, as.integer(nthreads))
     invisible(NULL)
 }
 
@@ -247,8 +277,8 @@ fraq_slice <- function(input, output, limit = NULL, select = NULL, nthreads = 1L
     }
     limit_val <- if (is.null(limit)) 0 else as.numeric(limit)
     select_vec <- if (is.null(select)) numeric() else as.numeric(select)
-    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
-    output <- normalizePath(output, winslash = "/", mustWork = FALSE)
+    input <- fraq_normalize_path_or_key(input)
+    output <- fraq_normalize_path_or_key(output)
     rcpp_fraq_slice(input, output, limit_val, select_vec, as.integer(nthreads))
     invisible(NULL)
 }
@@ -295,12 +325,10 @@ fraq_chunk <- function(
     chunk_size,
     nthreads = 1L
 ) {
-    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
-    output_prefix <- normalizePath(
-        output_prefix,
-        winslash = "/",
-        mustWork = FALSE
-    )
+    input <- fraq_normalize_path_or_key(input)
+    if (!identical(output_suffix, "mem")) {
+        output_prefix <- fraq_normalize_path_or_key(output_prefix)
+    }
     rcpp_fraq_chunk(
         input,
         output_prefix,
@@ -343,7 +371,7 @@ fraq_count_barcodes <- function(
     allow_revcomp = FALSE,
     nthreads = 1L
 ) {
-    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
+    input <- fraq_normalize_path_or_key(input)
     rcpp_fraq_count_barcodes(
         input,
         barcodes,
@@ -389,12 +417,8 @@ fraq_demux <- function(
     max_distance = 1L,
     nthreads = 1L
 ) {
-    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
-    output_format <- normalizePath(
-        output_format,
-        winslash = "/",
-        mustWork = FALSE
-    )
+    input <- fraq_normalize_path_or_key(input)
+    output_format <- fraq_normalize_path_or_key(output_format)
     rcpp_fraq_demux(
         input,
         output_format,
@@ -447,8 +471,8 @@ fraq_quality_filter <- function(
     } else {
         max_low_q_bases <- as.integer(max_low_q_bases)
     }
-    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
-    output <- normalizePath(output, winslash = "/", mustWork = FALSE)
+    input <- fraq_normalize_path_or_key(input)
+    output <- fraq_normalize_path_or_key(output)
     rcpp_fraq_quality_filter(
         input,
         output,
@@ -523,15 +547,9 @@ fraq_merge_pairs <- function(
         output_unmerged_vec <- output_unmerged
     }
     consensus_mode <- match.arg(consensus_mode)
-    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
-    output_merged <- normalizePath(
-        output_merged,
-        winslash = "/",
-        mustWork = FALSE)
-    output_unmerged_vec <- normalizePath(
-        output_unmerged_vec,
-        winslash = "/",
-        mustWork = FALSE)
+    input <- fraq_normalize_path_or_key(input)
+    output_merged <- fraq_normalize_path_or_key(output_merged)
+    output_unmerged_vec <- fraq_normalize_path_or_key(output_unmerged_vec)
     rcpp_fraq_merge_pairs(
         input,
         output_merged,
@@ -582,8 +600,8 @@ fraq_trim_adapters <- function(
     filter_untrimmed = TRUE,
     nthreads = 1L
 ) {
-    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
-    output <- normalizePath(output, winslash = "/", mustWork = FALSE)
+    input <- fraq_normalize_path_or_key(input)
+    output <- fraq_normalize_path_or_key(output)
     rcpp_fraq_trim_adapters(
         input,
         output,
@@ -682,7 +700,7 @@ fraq_summary <- function(
         stop("limit must be a single non-negative number")
     }
 
-    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
+    input <- fraq_normalize_path_or_key(input)
     rcpp_fraq_summary(
         input,
         phred33,

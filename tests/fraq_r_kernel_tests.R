@@ -141,6 +141,12 @@ cat("Testing fraq_run_r demultiplexing to multiple outputs...\n")
 demux_in <- write_fastq(tempfile(fileext = ".fastq"), single_records)
 even_out <- tempfile(fileext = ".fastq")
 odd_out <- tempfile(fileext = ".fastq")
+even_out_from_kernel <- even_out
+odd_out_from_kernel <- odd_out
+if (.Platform$OS.type == "windows") {
+    even_out_from_kernel <- chartr("/", "\\", even_out)
+    odd_out_from_kernel <- chartr("/", "\\", odd_out)
+}
 
 fraq_run_r(
     demux_in,
@@ -150,7 +156,7 @@ fraq_run_r(
                 reads[[1]][index %% 2 == 0, , drop = FALSE],
                 reads[[1]][index %% 2 == 1, , drop = FALSE]
             ),
-            c(even_out, odd_out)
+            c(even_out_from_kernel, odd_out_from_kernel)
         )
     },
     nthreads = 2L
@@ -160,7 +166,7 @@ stopifnot(identical(read_fastq_records(even_out), single_records[c(1L, 3L, 5L, 7
 stopifnot(identical(read_fastq_records(odd_out), single_records[c(2L, 4L, 6L, 8L)]))
 
 cat("Testing fraq_run_r .mem output...\n")
-mem_key <- tempfile(fileext = ".mem")
+mem_key <- paste0("~/", basename(tempfile("fraq_r_kernel_", fileext = ".mem")))
 mem_back <- tempfile(fileext = ".fastq")
 fraq_run_r(
     single_in,

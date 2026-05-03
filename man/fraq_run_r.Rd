@@ -33,7 +33,8 @@ threads; with \code{nthreads = 1} or after fork, it uses a serial path.
 \details{
 The kernel must return \code{NULL} or a named list of data frames. Each list name
 is an output path or \code{.mem} key, and each data frame must contain character
-columns \code{name}, \code{seq}, and \code{qual}.
+columns \code{name}, \code{seq}, and \code{qual}. Output paths are normalized before
+writing; \code{.mem} keys are exact in-memory identifiers and are not normalized.
 
 The R kernel runs only on the calling R thread. When \code{nthreads > 1},
 background threads are used for reading, joining, demultiplexing,
