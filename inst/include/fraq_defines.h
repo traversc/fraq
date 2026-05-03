@@ -9,6 +9,7 @@
 #include <limits>
 #include <tuple>
 #include <utility>
+#include <vector>
 #include <stdexcept>
 #include <string_view>
 #include <sys/stat.h>
@@ -33,6 +34,13 @@ struct Read {
   std::string seq;
   std::string qual;
 };
+
+inline void validate_read_storage_invariants(const Read &read) {
+    if (read.seq.size() != read.qual.size()) {
+        throw std::runtime_error("read sequence and quality lengths differ");
+    }
+}
+
 // tuple implementation
 template<size_t I> auto& get(Read& r) noexcept {
     if constexpr (I == 0) return r.name;

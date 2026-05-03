@@ -29,13 +29,44 @@ expect_error_message <- function(expr, pattern) {
     stopifnot(grepl(pattern, msg, fixed = TRUE))
 }
 
+uint_le_raw <- function(value, bytes) {
+    out <- raw(bytes)
+    value <- as.double(value)
+    for (i in seq_len(bytes)) {
+        out[i] <- as.raw(value %% 256)
+        value <- floor(value / 256)
+    }
+    out
+}
+
+fraq_file_header_raw <- function() {
+    c(charToRaw("FRAQ"), raw(10L), as.raw(0L), as.raw(1L))
+}
+
+write_raw_fraq <- function(bytes) {
+    path <- tempfile(fileext = ".fraq")
+    con <- file(path, open = "wb")
+    on.exit(close(con), add = TRUE)
+    writeBin(bytes, con)
+    path
+}
+
+write_fraq_with_minimal_count_header <- function(count_raw, count_class) {
+    write_raw_fraq(c(
+        fraq_file_header_raw(),
+        uint_le_raw(count_class, 4L),
+        count_raw,
+        raw(8L)
+    ))
+}
+
 default_blocksize <- 65535L
 invisible(fraq_options("blocksize", default_blocksize))
 
 extended <- identical(Sys.getenv("FRAQ_EXTENDED_TESTS"), "1")
 
 if (extended) {
-    n_reads <- default_blocksize * 10L
+    n_reads <- 1000000L
     read_length <- 100L
     threads <- 4L
     invisible(fraq_options("blocksize", default_blocksize))
@@ -45,6 +76,15 @@ if (extended) {
     threads <- 1L
     small_block <- 7L
     invisible(fraq_options("blocksize", small_block))
+}
+
+expect_fraq_convert_error <- function(path, pattern) {
+    for (nt in unique(c(1L, threads))) {
+        expect_error_message(
+            fraq_convert(path, tempfile(fileext = ".fastq"), nthreads = nt),
+            pattern
+        )
+    }
 }
 
 cat("Generating source FASTQ for format tests...\n")
@@ -91,6 +131,75 @@ expect_error_message(
     fraq_convert(bogus_fraq, tempfile(fileext = ".fastq"), nthreads = threads),
     "FRAQ"
 )
+
+reserved_header <- fraq_file_header_raw()
+reserved_header[5L] <- as.raw(1L)
+expect_fraq_convert_error(
+    write_raw_fraq(reserved_header),
+    "unsupported FRAQ header flags"
+)
+
+big_endian_header <- fraq_file_header_raw()
+big_endian_header[15L] <- as.raw(1L)
+expect_fraq_convert_error(
+    write_raw_fraq(big_endian_header),
+    "big-endian FRAQ files are not supported"
+)
+
+expect_fraq_convert_error(
+    write_raw_fraq(c(fraq_file_header_raw(), as.raw(c(0L, 0L, 0L, 128L)))),
+    "unsupported FRAQ block metadata flags"
+)
+
+invalid_counts <- list(
+    write_fraq_with_minimal_count_header(as.raw(0L), 0L),
+    write_fraq_with_minimal_count_header(uint_le_raw(65536L, 4L), 2L),
+    write_fraq_with_minimal_count_header(as.raw(rep(255L, 8L)), 3L)
+)
+for (path in invalid_counts) {
+    expect_fraq_convert_error(
+        path,
+        "invalid FRAQ block read count"
+    )
+}
+
+seq_size_src <- write_fastq(
+    tempfile(fileext = ".fastq"),
+    list(
+        list(name = "seq_size", seq = "ACGT", qual = "IIII")
+    )
+)
+seq_size_fraq <- tempfile(fileext = ".fraq")
+fraq_convert(seq_size_src, seq_size_fraq, nthreads = 1L)
+seq_size_bytes <- readBin(seq_size_fraq, what = "raw", n = file.info(seq_size_fraq)$size)
+seq_size_bytes[23L] <- as.raw(1L)
+expect_fraq_convert_error(
+    write_raw_fraq(seq_size_bytes),
+    "sequence payload size mismatch"
+)
+
+qual_mismatch <- write_fastq(
+    tempfile(fileext = ".fastq"),
+    list(
+        list(name = "qual_mismatch", seq = "ACGT", qual = "IIIIII")
+    )
+)
+for (nt in unique(c(1L, threads))) {
+    output_path <- tempfile(fileext = ".fraq")
+    expect_error_message(
+        fraq_convert(qual_mismatch, output_path, nthreads = nt),
+        "sequence and quality lengths differ"
+    )
+    stopifnot(!file.exists(output_path))
+}
+for (nt in unique(c(1L, threads))) {
+    output_path <- tempfile(fileext = ".fraq")
+    expect_error_message(
+        fraq_concat(qual_mismatch, output_path, nthreads = nt),
+        "sequence and quality lengths differ"
+    )
+    stopifnot(!file.exists(output_path))
+}
 
 cat("Testing fraq_mem helpers...\n")
 mem_src <- tempfile(fileext = ".fastq")

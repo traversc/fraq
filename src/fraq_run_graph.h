@@ -322,6 +322,10 @@ struct FraqRunGraph {
   }
   // Debug summary removed.
 
+  void request_interrupt() {
+    interrupted.store(true, std::memory_order_release);
+  }
+
   // final synchronization and making sure all writers and buffers are flushed
   void wait_and_flush() {
     // wait for all data processing to finish

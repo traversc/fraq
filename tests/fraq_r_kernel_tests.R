@@ -61,6 +61,8 @@ make_records <- function(prefix, n) {
     })
 }
 
+extended <- identical(Sys.getenv("FRAQ_EXTENDED_TESTS"), "1")
+default_blocksize <- 65535L
 old_blocksize <- fraq_options("blocksize", 3L)
 on.exit(fraq_options("blocksize", old_blocksize), add = TRUE)
 
@@ -182,5 +184,51 @@ expect_error_message(
     ),
     "named list"
 )
+
+cat("Testing fraq_run_r R kernel errors clean up partial output...\n")
+for (nt in c(1L, 2L)) {
+    output_path <- tempfile(fileext = ".fastq")
+    error_message <- paste0("kernel failure nthreads=", nt)
+    expect_error_message(
+        fraq_run_r(
+            single_in,
+            function(reads, index) {
+                if (length(index) > 0L && index[[1L]] >= 3) {
+                    stop(error_message, call. = FALSE)
+                }
+                stats::setNames(list(reads[[1]]), output_path)
+            },
+            nthreads = nt
+        ),
+        error_message
+    )
+    stopifnot(!file.exists(output_path))
+}
+
+if (extended) {
+    cat("Testing fraq_run_r paired-end large identity kernel...\n")
+    invisible(fraq_options("blocksize", default_blocksize))
+    large_n_reads <- 1000000L
+    large_input_path <- c(tempfile(fileext = ".fastq"), tempfile(fileext = ".fastq"))
+    large_output_path <- c(tempfile(fileext = ".fastq"), tempfile(fileext = ".fastq"))
+    generate_random_fastq(
+        large_input_path,
+        n_reads = large_n_reads,
+        read_length = 75L,
+        name_prefix = "r_kernel_large_"
+    )
+    large_identity_kernel <- function(reads, index) {
+        stats::setNames(reads, large_output_path)
+    }
+    fraq_run_r(
+        large_input_path,
+        large_identity_kernel,
+        nthreads = 4L
+    )
+    stopifnot(identical(
+        unname(tools::md5sum(large_output_path)),
+        unname(tools::md5sum(large_input_path))
+    ))
+}
 
 cat("fraq_run_r tests completed successfully\n")

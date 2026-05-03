@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cctype>
 #include <atomic>
 #include <chrono>
@@ -152,7 +153,21 @@ void fraq_run(const std::vector<std::string> &input_files, fraq::process_task_t 
   } else {
     tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, thread_count);
     fraq_internal::FraqRunGraph fg(input_files, task, config, mem_store);
-    fg.wait_and_flush();
+    try {
+      fg.wait_and_flush();
+    } catch (...) {
+      std::exception_ptr original = std::current_exception();
+      fg.request_interrupt();
+      try {
+        fg.wait_and_flush();
+      } catch (...) {
+        try {
+          fg.cleanup_outputs();
+        } catch (...) {
+        }
+      }
+      std::rethrow_exception(original);
+    }
     excess = fg.check_reader_balance();
   }
   if (interrupt_state.exception) {
@@ -179,16 +194,25 @@ inline void fraq_concat(const std::vector<std::string> &input_files,
   }
   tbb::global_control gc(tbb::global_control::parameter::max_allowed_parallelism, thread_count);
   const bool is_fraq_output = ends_with(output_file, ".fraq") || ends_with(output_file, ".mem");
-  if (is_fraq_output) {
-    fraq_internal::FraqConcatGraph fg(input_files, config, mem_store, output_file);
-    fg.start();
-    fg.wait();
-    fg.flush();
-  } else {
-    fraq_internal::FastqConcatGraph fg(input_files, config, mem_store, output_file);
-    fg.start();
-    fg.wait();
-    fg.flush();
+  try {
+    if (is_fraq_output) {
+      fraq_internal::FraqConcatGraph fg(input_files, config, mem_store, output_file);
+      fg.start();
+      fg.wait();
+      fg.flush();
+    } else {
+      fraq_internal::FastqConcatGraph fg(input_files, config, mem_store, output_file);
+      fg.start();
+      fg.wait();
+      fg.flush();
+    }
+  } catch (...) {
+    if (ends_with(output_file, ".mem")) {
+      mem_store.erase(output_file);
+    } else if (!ends_with(output_file, ".fifo")) {
+      std::remove(output_file.c_str());
+    }
+    throw;
   }
 }
 
@@ -366,6 +390,10 @@ void rcpp_fraq_run_r(std::vector<std::string> input,
       try {
         fg.wait_and_flush();
       } catch (...) {
+        try {
+          fg.cleanup_outputs();
+        } catch (...) {
+        }
       }
       std::rethrow_exception(original);
     }
@@ -700,6 +728,8 @@ Rcpp::List rcpp_fraq_merge_pairs(const std::vector<std::string> &input,
     MergeStats &local = stats_tls ? stats_tls->local() : serial_stats;
     const fraq::Read &r1 = reads[0];
     const fraq::Read &r2 = reads[1];
+    fraq::validate_read_storage_invariants(r1);
+    fraq::validate_read_storage_invariants(r2);
 
     std::string seq2 = revcomp_R2 ? fraq::reverse_complement(r2.seq) : r2.seq;
     std::string qual2 = revcomp_R2 ? reverse_quality(r2.qual) : r2.qual;

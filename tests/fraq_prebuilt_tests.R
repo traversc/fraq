@@ -62,6 +62,7 @@ expect_error_message <- function(expr, pattern) {
 
 default_blocksize <- 65535L
 invisible(fraq_options("blocksize", default_blocksize))
+extended <- identical(Sys.getenv("FRAQ_EXTENDED_TESTS"), "1")
 
 
 cat("Testing generate_random_fastq paired-end output...\n")
@@ -323,6 +324,24 @@ stopifnot(length(unmerged_records_r2) == 1L)
 stopifnot(merge_stats$merged_reads == 1)
 stopifnot(merge_stats$unmerged_reads == 1)
 
+bad_merge_r1 <- write_fastq(tempfile(fileext = ".fastq"), list(
+    list(name = "bad_pair", seq = "ACGTAC", qual = "III")
+))
+bad_merge_r2 <- write_fastq(tempfile(fileext = ".fastq"), list(
+    list(name = "bad_pair", seq = "GTACGT", qual = "IIIIII")
+))
+expect_error_message(
+    fraq_merge_pairs(
+        c(bad_merge_r1, bad_merge_r2),
+        tempfile(fileext = ".fastq"),
+        c(tempfile(fileext = ".fastq"), tempfile(fileext = ".fastq")),
+        min_overlap = 3L,
+        max_mismatch_rate = 0.0,
+        nthreads = 1L
+    ),
+    "sequence and quality lengths differ"
+)
+
 cat("Testing fraq_trim_adapters...\n")
 trim_records <- list(
     list(name = "t1", seq = "AAACCC", qual = "IIIIII"),
@@ -444,5 +463,36 @@ uneven_reads1 <- read_fastq_records(uneven_out1)
 uneven_reads2 <- read_fastq_records(uneven_out2)
 stopifnot(length(uneven_reads1) == 2L)
 stopifnot(length(uneven_reads2) == 2L)
+
+if (extended) {
+    cat("Testing large prebuilt-kernel smoke paths...\n")
+    large_n_reads <- 1000000L
+    large_in <- tempfile(fileext = ".fastq")
+    generate_random_fastq(
+        large_in,
+        n_reads = large_n_reads,
+        read_length = 75L,
+        name_prefix = "large_kernel_"
+    )
+
+    large_summary <- fraq_summary(large_in, nthreads = 4L)
+    stopifnot(large_summary$basic_stats_R1$total_sequences[1] == large_n_reads)
+
+    large_downsample <- tempfile(fileext = ".fastq")
+    fraq_downsample(large_in, large_downsample, amount = 1, nthreads = 4L)
+    stopifnot(identical(
+        unname(tools::md5sum(large_downsample)),
+        unname(tools::md5sum(large_in))
+    ))
+
+    large_slice <- tempfile(fileext = ".fastq")
+    fraq_slice(
+        large_in,
+        large_slice,
+        select = c(0L, large_n_reads - 1L),
+        nthreads = 4L
+    )
+    stopifnot(length(read_fastq_records(large_slice)) == 2L)
+}
 
 cat("fraq kernel tests completed successfully\n")

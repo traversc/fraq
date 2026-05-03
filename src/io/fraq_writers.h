@@ -475,6 +475,7 @@ struct FraqfFileWriter : IFraqfWriter {
         ofs.write(block.compressed_seqs.data(), block.compressed_seqs.size());
         ofs.write(block.compressed_quals.data(), block.compressed_quals.size());
         if (!ofs) throw std::runtime_error("FraqfFileWriter: block write failed");
+        block = CompressedReadBlock{};
     }
 
     void flush() override {
@@ -505,6 +506,7 @@ struct FraqfMemWriter : IFraqfWriter {
 
     void write_compressed_block(CompressedReadBlock&& block) override {
         vec->push_back(std::move(block)); // destructive move into store
+        block = CompressedReadBlock{};
     }
 
     void flush() override {

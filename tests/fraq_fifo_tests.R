@@ -4,7 +4,7 @@ default_blocksize <- 65535L
 extended <- identical(Sys.getenv("FRAQ_EXTENDED_TESTS"), "1")
 
 if (extended) {
-    n_reads <- default_blocksize * 10L
+    n_reads <- 1000000L
     read_length <- 100L
     threads <- 4L
     invisible(fraq_options("blocksize", default_blocksize))

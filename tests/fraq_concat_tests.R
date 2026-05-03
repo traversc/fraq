@@ -22,6 +22,7 @@ concat_identical <- function(
 }
 
 set.seed(1)
+extended <- identical(Sys.getenv("FRAQ_EXTENDED_TESTS"), "1")
 
 # Test 1: plain/gz/zst serial
 plain <- tempfile(fileext = ".fastq")
@@ -112,5 +113,35 @@ concat_identical(
     out_mem,
     nthreads = 2L
 )
+
+if (extended) {
+    cat("Testing fraq_concat large extended input...\n")
+    large_counts <- c(333333L, 333333L, 333334L)
+    large_inputs <- vapply(
+        seq_along(large_counts),
+        function(i) {
+            path <- tempfile(fileext = ".fastq")
+            generate_random_fastq(
+                path,
+                n_reads = large_counts[i],
+                read_length = 75L,
+                name_prefix = paste0("concat_large_", i, "_")
+            )
+            path
+        },
+        character(1)
+    )
+    large_out <- tempfile(fileext = ".fastq")
+    fraq_concat(large_inputs, large_out, nthreads = 4L)
+    large_summary <- fraq_summary(large_out, nthreads = 1L)
+    stopifnot(large_summary$basic_stats_R1$total_sequences[1] == sum(large_counts))
+
+    large_serial_out <- tempfile(fileext = ".fastq")
+    fraq_concat(large_inputs, large_serial_out, nthreads = 1L)
+    stopifnot(identical(
+        unname(tools::md5sum(large_serial_out)),
+        unname(tools::md5sum(large_out))
+    ))
+}
 
 cat("fraq_concat tests completed successfully\n")

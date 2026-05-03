@@ -6,9 +6,11 @@
 #include <string>
 #include <algorithm>
 #include <cstring>
+#include <cstdint>
 #include <limits>
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 #include <zstd.h>
 #include "fraq_defines.h"
 
@@ -17,6 +19,42 @@ namespace fraq_internal {
 using fraq::Read;
 
 constexpr size_t MAX_BLOCKSIZE = 65535; // max 16-bit block size
+
+bool is_big_endian();
+
+inline void ensure_little_endian_supported() {
+  if (is_big_endian()) {
+    throw std::runtime_error("FRAQ v1 is only supported on little-endian systems");
+  }
+}
+
+inline size_t checked_to_size_t(uint64_t value, const char* field_name) {
+  if (value > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+    throw std::runtime_error(std::string("FRAQ field too large for this platform: ") + field_name);
+  }
+  return static_cast<size_t>(value);
+}
+
+inline size_t checked_add_size_t(size_t a, size_t b, const char* field_name) {
+  if (a > std::numeric_limits<size_t>::max() - b) {
+    throw std::runtime_error(std::string("FRAQ size overflow: ") + field_name);
+  }
+  return a + b;
+}
+
+inline size_t checked_mul_size_t(size_t a, size_t b, const char* field_name) {
+  if (a != 0 && b > std::numeric_limits<size_t>::max() / a) {
+    throw std::runtime_error(std::string("FRAQ size overflow: ") + field_name);
+  }
+  return a * b;
+}
+
+inline uint64_t checked_add_u64(uint64_t a, uint64_t b, const char* field_name) {
+  if (a > std::numeric_limits<uint64_t>::max() - b) {
+    throw std::runtime_error(std::string("FRAQ size overflow: ") + field_name);
+  }
+  return a + b;
+}
 
 // standard nucleotides for bit packing
 static const auto fraq_standard_bases = [](){
@@ -98,7 +136,9 @@ bool is_big_endian() {
 std::vector<char> do_zstd_compress(const std::vector<char>& buf, const int compress_level){
   size_t bound = ZSTD_compressBound(buf.size());
   std::vector<char> out(bound);
-  size_t csize = ZSTD_compress(out.data(), bound, buf.data(), buf.size(), compress_level);
+  const char empty_src = 0;
+  const void* src = buf.empty() ? static_cast<const void*>(&empty_src) : buf.data();
+  size_t csize = ZSTD_compress(out.data(), bound, src, buf.size(), compress_level);
   if (ZSTD_isError(csize)) {
     throw std::runtime_error(ZSTD_getErrorName(csize));
   }
@@ -128,8 +168,12 @@ struct CompressedReadBlock {
 // write
 
 CompressedReadBlock compress_reads(const Read * reads, const size_t n, const int compress_level) {
+  if (n == 0)
+    throw std::runtime_error("cannot compress an empty read block");
   if (n > MAX_BLOCKSIZE)
     throw std::runtime_error("block size > MAX_BLOCKSIZE");
+  if (!reads)
+    throw std::runtime_error("cannot compress a null read block");
   
   // 1) scan for sizes, non-standard bases, and length overflow
   size_t total_name_bytes = 0;
@@ -144,8 +188,9 @@ CompressedReadBlock compress_reads(const Read * reads, const size_t n, const int
     auto & m = reads[i];
     size_t name_len = m.name.size();
     size_t seq_len  = m.seq.size();
-    total_name_bytes += name_len;
-    total_seq_bytes  += seq_len;
+    fraq::validate_read_storage_invariants(m);
+    total_name_bytes = checked_add_size_t(total_name_bytes, name_len, "total read name bytes");
+    total_seq_bytes  = checked_add_size_t(total_seq_bytes, seq_len, "total read sequence bytes");
     max_seq_len = std::max(max_seq_len, seq_len);
     max_name_len = std::max(max_name_len, name_len);
     
@@ -164,8 +209,15 @@ CompressedReadBlock compress_reads(const Read * reads, const size_t n, const int
 
   DynArray name_sizes = DynArray::make(n, max_name_len - common_name_prefix.size());
   DynArray seq_sizes = DynArray::make(n, max_seq_len);
-  std::vector<char> names(total_name_bytes - n * common_name_prefix.size() );
-  std::vector<char> seqs(use_bit_pack ? ((total_seq_bytes + 1) / 2) : total_seq_bytes);
+  const size_t shared_prefix_bytes = checked_mul_size_t(n, common_name_prefix.size(), "shared name prefix bytes");
+  if (shared_prefix_bytes > total_name_bytes) {
+    throw std::runtime_error("FRAQ internal name prefix size mismatch");
+  }
+  const size_t seq_payload_bytes = use_bit_pack
+      ? (total_seq_bytes / 2 + (total_seq_bytes % 2))
+      : total_seq_bytes;
+  std::vector<char> names(total_name_bytes - shared_prefix_bytes);
+  std::vector<char> seqs(seq_payload_bytes);
   std::vector<char> quals(total_seq_bytes);
   
   // 1) write names, seqs (packed or raw), quals
@@ -183,8 +235,10 @@ CompressedReadBlock compress_reads(const Read * reads, const size_t n, const int
     const size_t name_len  = name.size() - name_skip;
     
     name_sizes.set(i, name_len);
-    std::memcpy(pname, name.data() + name_skip, name_len);
-    pname += name_len;
+    if (name_len != 0) {
+      std::memcpy(pname, name.data() + name_skip, name_len);
+      pname += name_len;
+    }
     
     seq_sizes.set(i, seq.size());
     if (use_bit_pack) {
@@ -199,11 +253,15 @@ CompressedReadBlock compress_reads(const Read * reads, const size_t n, const int
         ++pos;
       }
     } else {
-      std::memcpy(pseq, seq.data(), seq.size());
-      pseq += seq.size();
+      if (!seq.empty()) {
+        std::memcpy(pseq, seq.data(), seq.size());
+        pseq += seq.size();
+      }
     }
-    std::memcpy(pqual, qual.data(), qual.size());
-    pqual += qual.size();
+    if (!qual.empty()) {
+      std::memcpy(pqual, qual.data(), qual.size());
+      pqual += qual.size();
+    }
   }
   
   // return block
@@ -314,7 +372,7 @@ std::vector<char> generate_block_header(const CompressedReadBlock &b) {
 
 std::array<uint8_t, 16> generate_file_header() {
   constexpr uint8_t FRAQ_FORMAT_VERSION = 1;
-  bool be = is_big_endian();
+  ensure_little_endian_supported();
   // Write a file header with magic bits and version
   std::array<uint8_t, 16> file_header = 
     {'F','R','A','Q', // magic bits
@@ -322,7 +380,7 @@ std::array<uint8_t, 16> generate_file_header() {
      0,0,0,0,
      0,0,
      // big-endian flag, files written in big-endian cant be read on little-endian systems and vice versa
-     static_cast<uint8_t>(be),
+     0,
      FRAQ_FORMAT_VERSION}; // version 1
   return file_header;
 }
@@ -363,8 +421,14 @@ inline uint8_t read_fraq_header(std::istream& is, uint8_t supported_version) {
     throw std::runtime_error("bad FRAQ magic");
   }
   
-  if (h[14] != static_cast<uint8_t>(is_big_endian())) {
-    throw std::runtime_error("endianness mismatch (v1 not portable)");
+  ensure_little_endian_supported();
+  for (size_t i = 4; i < 14; ++i) {
+    if (h[i] != 0) {
+      throw std::runtime_error("unsupported FRAQ header flags");
+    }
+  }
+  if (h[14] != 0) {
+    throw std::runtime_error("big-endian FRAQ files are not supported");
   }
   
   if (h[15] == 0 || h[15] > supported_version) {
@@ -392,6 +456,9 @@ CompressedReadBlock read_block(std::istream& is) {
   };
   
   auto rd_exact = [&](void* p, size_t n) {
+    if (n == 0) {
+      return;
+    }
     if (!is.read(static_cast<char*>(p), n)) {
       throw std::runtime_error("short read while reading block payload");
     }
@@ -401,6 +468,10 @@ CompressedReadBlock read_block(std::istream& is) {
   uint32_t meta = 0;
   if (!is.read(reinterpret_cast<char*>(&meta), 4)) {
     throw std::runtime_error("short read while reading block meta");
+  }
+  static constexpr uint32_t known_meta_mask = (1u << 23) - 1u;
+  if ((meta & ~known_meta_mask) != 0) {
+    throw std::runtime_error("unsupported FRAQ block metadata flags");
   }
   
   auto cls = [&](unsigned shift) -> ES {
@@ -430,6 +501,16 @@ CompressedReadBlock read_block(std::istream& is) {
   const uint64_t v_cseq_lengths_sz       = read_uint(c_cseq_lengths_sz);
   const uint64_t v_cseqs_sz              = read_uint(c_cseqs_sz);
   const uint64_t v_cquals_sz             = read_uint(c_cquals_sz);
+
+  if (v_num_reads == 0 || v_num_reads > MAX_BLOCKSIZE) {
+    throw std::runtime_error("invalid FRAQ block read count");
+  }
+  const size_t name_prefix_sz       = checked_to_size_t(v_name_prefix_sz, "name prefix size");
+  const size_t cname_lengths_sz     = checked_to_size_t(v_cname_lengths_sz, "compressed name lengths size");
+  const size_t cnames_sz            = checked_to_size_t(v_cnames_sz, "compressed names size");
+  const size_t cseq_lengths_sz      = checked_to_size_t(v_cseq_lengths_sz, "compressed sequence lengths size");
+  const size_t cseqs_sz             = checked_to_size_t(v_cseqs_sz, "compressed sequences size");
+  const size_t cquals_sz            = checked_to_size_t(v_cquals_sz, "compressed qualities size");
   
   CompressedReadBlock b;
   b.name_len_elem_size      = name_len_elem_size;
@@ -439,22 +520,22 @@ CompressedReadBlock read_block(std::istream& is) {
   b.uncompressed_names_size = v_uncompressed_names_sz;
   b.uncompressed_seqs_size  = v_uncompressed_seqs_sz;
   
-  b.name_prefix.resize(static_cast<size_t>(v_name_prefix_sz));
+  b.name_prefix.resize(name_prefix_sz);
   rd_exact(b.name_prefix.data(), b.name_prefix.size());
   
-  b.compressed_name_lengths.resize(static_cast<size_t>(v_cname_lengths_sz));
+  b.compressed_name_lengths.resize(cname_lengths_sz);
   rd_exact(b.compressed_name_lengths.data(), b.compressed_name_lengths.size());
   
-  b.compressed_names.resize(static_cast<size_t>(v_cnames_sz));
+  b.compressed_names.resize(cnames_sz);
   rd_exact(b.compressed_names.data(), b.compressed_names.size());
   
-  b.compressed_seq_lengths.resize(static_cast<size_t>(v_cseq_lengths_sz));
+  b.compressed_seq_lengths.resize(cseq_lengths_sz);
   rd_exact(b.compressed_seq_lengths.data(), b.compressed_seq_lengths.size());
   
-  b.compressed_seqs.resize(static_cast<size_t>(v_cseqs_sz));
+  b.compressed_seqs.resize(cseqs_sz);
   rd_exact(b.compressed_seqs.data(), b.compressed_seqs.size());
   
-  b.compressed_quals.resize(static_cast<size_t>(v_cquals_sz));
+  b.compressed_quals.resize(cquals_sz);
   rd_exact(b.compressed_quals.data(), b.compressed_quals.size());
   
   return b;
@@ -475,17 +556,24 @@ std::vector<Read> decompress_block(const CompressedReadBlock& b) {
   auto zstd_decompress_exact = [](std::vector<char>& out, size_t out_size,
                                   const std::vector<char>& in) {
     out.resize(out_size);
-    size_t got = ZSTD_decompress(out.data(), out.size(), in.data(), in.size());
+    char empty_dst = 0;
+    const char empty_src = 0;
+    void* dst = out_size == 0 ? static_cast<void*>(&empty_dst) : out.data();
+    const void* src = in.empty() ? static_cast<const void*>(&empty_src) : in.data();
+    size_t got = ZSTD_decompress(dst, out.size(), src, in.size());
     if (ZSTD_isError(got) || got != out_size) {
       throw std::runtime_error("zstd decompress failed or size mismatch");
     }
   };
   
   const size_t n_reads = b.num_reads;
+  if (n_reads == 0 || n_reads > MAX_BLOCKSIZE) {
+    throw std::runtime_error("invalid FRAQ block read count");
+  }
   
   // 1) Decompress length arrays first (we need them to size quals and rebuild fields)
-  const size_t name_len_bytes = bytes_per(b.name_len_elem_size) * n_reads;
-  const size_t seq_len_bytes  = bytes_per(b.seq_len_elem_size)  * n_reads;
+  const size_t name_len_bytes = checked_mul_size_t(bytes_per(b.name_len_elem_size), n_reads, "name length array bytes");
+  const size_t seq_len_bytes  = checked_mul_size_t(bytes_per(b.seq_len_elem_size), n_reads, "sequence length array bytes");
   
   std::vector<char> name_len_buf;
   std::vector<char> seq_len_buf;
@@ -496,69 +584,106 @@ std::vector<Read> decompress_block(const CompressedReadBlock& b) {
   uint64_t total_name_tail = 0;
   uint64_t total_seq_len   = 0;
   for (size_t i = 0; i < n_reads; ++i) {
-    total_name_tail += load_u64(name_len_buf, i, b.name_len_elem_size);
-    total_seq_len   += load_u64(seq_len_buf,  i, b.seq_len_elem_size);
+    total_name_tail = checked_add_u64(total_name_tail, load_u64(name_len_buf, i, b.name_len_elem_size),
+                                      "total name tail bytes");
+    total_seq_len = checked_add_u64(total_seq_len, load_u64(seq_len_buf,  i, b.seq_len_elem_size),
+                                    "total sequence bytes");
   }
   
-  // Optional sanity checks (kept simple)
   if (total_name_tail != b.uncompressed_names_size) {
     throw std::runtime_error("names payload size mismatch");
   }
+  const uint64_t expected_seq_payload_size = b.use_bit_pack
+      ? (total_seq_len / 2 + (total_seq_len % 2))
+      : total_seq_len;
+  if (expected_seq_payload_size != b.uncompressed_seqs_size) {
+    throw std::runtime_error("sequence payload size mismatch");
+  }
+  const size_t names_payload_size = checked_to_size_t(b.uncompressed_names_size, "names payload size");
+  const size_t seqs_payload_size  = checked_to_size_t(b.uncompressed_seqs_size, "sequence payload size");
+  const size_t quals_payload_size = checked_to_size_t(total_seq_len, "quality payload size");
   
   // 2) Decompress payloads
   std::vector<char> names_payload;
   std::vector<char> seqs_payload;
   std::vector<char> quals_payload;
   
-  zstd_decompress_exact(names_payload, static_cast<size_t>(b.uncompressed_names_size),
-                        b.compressed_names);
-  zstd_decompress_exact(seqs_payload,  static_cast<size_t>(b.uncompressed_seqs_size),
-                        b.compressed_seqs);
-  zstd_decompress_exact(quals_payload, static_cast<size_t>(total_seq_len),
-                        b.compressed_quals);
+  zstd_decompress_exact(names_payload, names_payload_size, b.compressed_names);
+  zstd_decompress_exact(seqs_payload, seqs_payload_size, b.compressed_seqs);
+  zstd_decompress_exact(quals_payload, quals_payload_size, b.compressed_quals);
   
   // 3) Rebuild reads
   std::vector<Read> out;
   out.reserve(n_reads);
-  
-  const char* pname = names_payload.data();
-  const char* pqual = quals_payload.data();
   
   // inverse code map for bit-packed sequences
   static const char inv_code[16] = {
     'A','C','G','T','R','Y','S','W','K','M','B','D','H','V','N','U'
   };
   const unsigned char* pseq_packed = reinterpret_cast<const unsigned char*>(seqs_payload.data());
-  const char* pseq_raw = seqs_payload.data();
+  size_t name_offset = 0;
+  size_t seq_offset = 0;
+  size_t qual_offset = 0;
   uint64_t pos_nibbles = 0; // only used if bit-packed
   
   for (size_t i = 0; i < n_reads; ++i) {
-    const uint64_t name_tail_len = load_u64(name_len_buf, i, b.name_len_elem_size);
-    const uint64_t seq_len       = load_u64(seq_len_buf,  i, b.seq_len_elem_size);
+    const size_t name_tail_len = checked_to_size_t(load_u64(name_len_buf, i, b.name_len_elem_size),
+                                                   "read name tail length");
+    const size_t seq_len = checked_to_size_t(load_u64(seq_len_buf, i, b.seq_len_elem_size),
+                                             "read sequence length");
     
     Read r;
-    r.name.reserve(b.name_prefix.size() + static_cast<size_t>(name_tail_len));
+    r.name.reserve(checked_add_size_t(b.name_prefix.size(), name_tail_len, "read name length"));
     r.name = b.name_prefix;
-    r.name.append(pname, static_cast<size_t>(name_tail_len));
-    pname += name_tail_len;
+    if (name_offset > names_payload.size() ||
+        name_tail_len > names_payload.size() - name_offset) {
+      throw std::runtime_error("name payload bounds check failed");
+    }
+    if (name_tail_len != 0) {
+      r.name.append(names_payload.data() + name_offset, name_tail_len);
+    }
+    name_offset += name_tail_len;
     
-    r.seq.resize(static_cast<size_t>(seq_len));
+    r.seq.resize(seq_len);
     if (b.use_bit_pack) {
       for (size_t k = 0; k < seq_len; ++k, ++pos_nibbles) {
         const size_t j = static_cast<size_t>(pos_nibbles >> 1);
+        if (j >= seqs_payload.size()) {
+          throw std::runtime_error("sequence payload bounds check failed");
+        }
         const uint8_t byte = pseq_packed[j];
         const uint8_t code = (pos_nibbles & 1) ? (byte & 0x0Fu) : ((byte >> 4) & 0x0Fu);
         r.seq[k] = inv_code[code];
       }
     } else {
-      r.seq.assign(pseq_raw, pseq_raw + seq_len);
-      pseq_raw += seq_len;
+      if (seq_offset > seqs_payload.size() ||
+          seq_len > seqs_payload.size() - seq_offset) {
+        throw std::runtime_error("sequence payload bounds check failed");
+      }
+      if (seq_len != 0) {
+        r.seq.assign(seqs_payload.data() + seq_offset, seqs_payload.data() + seq_offset + seq_len);
+      }
+      seq_offset += seq_len;
     }
     
-    r.qual.assign(pqual, pqual + seq_len);
-    pqual += seq_len;
+    if (qual_offset > quals_payload.size() ||
+        seq_len > quals_payload.size() - qual_offset) {
+      throw std::runtime_error("quality payload bounds check failed");
+    }
+    if (seq_len != 0) {
+      r.qual.assign(quals_payload.data() + qual_offset, quals_payload.data() + qual_offset + seq_len);
+    }
+    qual_offset += seq_len;
     
     out.push_back(std::move(r));
+  }
+  const size_t consumed_seq_payload = b.use_bit_pack
+      ? checked_to_size_t(pos_nibbles / 2 + (pos_nibbles % 2), "consumed packed sequence bytes")
+      : seq_offset;
+  if (name_offset != names_payload.size() ||
+      consumed_seq_payload != seqs_payload.size() ||
+      qual_offset != quals_payload.size()) {
+    throw std::runtime_error("FRAQ payload reconstruction consumed unexpected byte count");
   }
   return out;
 }
