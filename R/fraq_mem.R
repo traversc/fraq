@@ -16,7 +16,8 @@
 #'   `n_reads`.
 #' * `fraq_mem_remove()` returns a logical vector indicating which keys were
 #' removed.
-#' * `fraq_mem_load()` returns the target `.mem` keys invisibly.
+#' * `fraq_mem_load()` returns the target `.mem` keys invisibly, exactly as
+#' supplied.
 #'
 #' @examples
 #' tmp <- tempfile(fileext = ".fastq")
@@ -34,7 +35,7 @@ fraq_mem_list <- function() {
 #' @param mem_key Character vector of `.mem` keys to remove.
 #' @export
 fraq_mem_remove <- function(mem_key) {
-    mem_key <- normalizePath(mem_key, winslash = "/", mustWork = FALSE)
+    mem_key <- fraq_normalize_path_or_key(mem_key)
     vapply(mem_key, rcpp_fraq_mem_remove, logical(1))
 }
 
@@ -52,8 +53,8 @@ fraq_mem_load <- function(input, mem_key, nthreads = 1L) {
     if (any(!grepl("\\.mem$", mem_key, ignore.case = FALSE))) {
         stop("All `mem_key` entries must end with '.mem'.")
     }
-    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
-    mem_key <- normalizePath(mem_key, winslash = "/", mustWork = FALSE)
+    input <- fraq_normalize_path_or_key(input)
+    mem_key <- fraq_normalize_path_or_key(mem_key)
     rcpp_fraq_convert(input, mem_key, nthreads)
     invisible(mem_key)
 }

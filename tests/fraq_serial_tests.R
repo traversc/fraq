@@ -1,23 +1,6 @@
 suppressPackageStartupMessages(library(fraq))
 library(parallel)
 
-write_fastq <- function(path, records) {
-    stopifnot(length(records) > 0L)
-    lines <- character(length(records) * 4L)
-    for (i in seq_along(records)) {
-        rec <- records[[i]]
-        idx <- (i - 1L) * 4L
-        lines[idx + 1L] <- paste0("@", rec$name)
-        lines[idx + 2L] <- rec$seq
-        lines[idx + 3L] <- "+"
-        lines[idx + 4L] <- rec$qual
-    }
-    con <- file(path, open = "wb")
-    on.exit(close(con), add = TRUE)
-    writeLines(lines, con = con, sep = "\n", useBytes = TRUE)
-    invisible(path)
-}
-
 read_fastq_records <- function(path) {
     if (!file.exists(path)) {
         return(list())
@@ -38,24 +21,18 @@ read_fastq_records <- function(path) {
     })
 }
 
-make_records <- function(prefix, n) {
-    bases <- c("ACGT", "TGCA", "GATT", "CCGG", "TTAA", "GGCC", "AACC", "TTGG")
-    lapply(seq_len(n), function(i) {
-        seq <- paste0(bases[((i - 1L) %% length(bases)) + 1L], bases[((i + 2L) %% length(bases)) + 1L])
-        list(
-            name = paste0(prefix, i),
-            seq = seq,
-            qual = paste(rep.int(LETTERS[((i - 1L) %% 10L) + 9L], nchar(seq)), collapse = "")
-        )
-    })
-}
-
 old_blocksize <- fraq_options("blocksize", 3L)
 on.exit(fraq_options("blocksize", old_blocksize), add = TRUE)
 
 cat("Testing serial C++ path with .fraq conversion...\n")
-serial_records <- make_records("serial_", 8L)
-serial_in <- write_fastq(tempfile(fileext = ".fastq"), serial_records)
+serial_in <- tempfile(fileext = ".fastq")
+generate_random_fastq(
+    serial_in,
+    n_reads = 8L,
+    read_length = 50L,
+    name_prefix = "serial_"
+)
+serial_records <- read_fastq_records(serial_in)
 serial_fraq <- tempfile(fileext = ".fraq")
 serial_back <- tempfile(fileext = ".fastq")
 fraq_convert(serial_in, serial_fraq, nthreads = 1L)
@@ -63,23 +40,35 @@ fraq_convert(serial_fraq, serial_back, nthreads = 1L)
 stopifnot(identical(read_fastq_records(serial_back), serial_records))
 
 cat("Testing serial concat path...\n")
-concat_a <- make_records("concat_a_", 4L)
-concat_b <- make_records("concat_b_", 5L)
-concat_in <- c(
-    write_fastq(tempfile(fileext = ".fastq"), concat_a),
-    write_fastq(tempfile(fileext = ".fastq"), concat_b)
+concat_in <- c(tempfile(fileext = ".fastq"), tempfile(fileext = ".fastq"))
+generate_random_fastq(
+    concat_in[1],
+    n_reads = 4L,
+    read_length = 50L,
+    name_prefix = "concat_a_"
 )
+generate_random_fastq(
+    concat_in[2],
+    n_reads = 5L,
+    read_length = 50L,
+    name_prefix = "concat_b_"
+)
+concat_a <- read_fastq_records(concat_in[1])
+concat_b <- read_fastq_records(concat_in[2])
 concat_out <- tempfile(fileext = ".fastq")
 fraq_concat(concat_in, concat_out, nthreads = 1L)
 stopifnot(identical(read_fastq_records(concat_out), c(concat_a, concat_b)))
 
 cat("Testing serial R kernel path...\n")
-paired_r1 <- make_records("serial_r1_", 7L)
-paired_r2 <- make_records("serial_r2_", 7L)
-paired_in <- c(
-    write_fastq(tempfile(fileext = ".fastq"), paired_r1),
-    write_fastq(tempfile(fileext = ".fastq"), paired_r2)
+paired_in <- c(tempfile(fileext = ".fastq"), tempfile(fileext = ".fastq"))
+generate_random_fastq(
+    paired_in,
+    n_reads = 7L,
+    read_length = 50L,
+    name_prefix = "serial_r_"
 )
+paired_r1 <- read_fastq_records(paired_in[1])
+paired_r2 <- read_fastq_records(paired_in[2])
 paired_out <- c(tempfile(fileext = ".fastq"), tempfile(fileext = ".fastq"))
 fraq_run_r(
     paired_in,
@@ -99,8 +88,14 @@ stopifnot(identical(read_fastq_records(paired_out[2]), paired_r2[expected_keep])
 if (.Platform$OS.type != "windows") {
     cat("Testing forked calls force serial path...\n")
     fork_results <- mclapply(seq_len(2L), function(i) {
-        records <- make_records(paste0("fork_", i, "_"), 6L)
-        input <- write_fastq(tempfile(fileext = ".fastq"), records)
+        input <- tempfile(fileext = ".fastq")
+        generate_random_fastq(
+            input,
+            n_reads = 6L,
+            read_length = 50L,
+            name_prefix = paste0("fork_", i, "_")
+        )
+        records <- read_fastq_records(input)
         output <- tempfile(fileext = ".fastq")
         fraq_convert(input, output, nthreads = 2L)
         convert_ok <- identical(read_fastq_records(output), records)

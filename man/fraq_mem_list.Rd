@@ -25,7 +25,8 @@ fraq_mem_load(input, mem_key, nthreads = 1L)
 \code{n_reads}.
 \item \code{fraq_mem_remove()} returns a logical vector indicating which keys were
 removed.
-\item \code{fraq_mem_load()} returns the target \code{.mem} keys invisibly.
+\item \code{fraq_mem_load()} returns the target \code{.mem} keys invisibly, exactly as
+supplied.
 }
 }
 \description{

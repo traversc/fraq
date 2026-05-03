@@ -210,7 +210,6 @@ generate_random_fastq(
     name_prefix = "mem_src_"
 )
 mem_key <- tempfile(fileext = ".mem")
-mem_key <- normalizePath(mem_key, winslash = "/", mustWork = FALSE)
 fraq_mem_load(mem_src, mem_key, nthreads = 1L)
 mem_df <- fraq_mem_list()
 stopifnot(mem_key %in% mem_df$mem_key)
@@ -249,7 +248,6 @@ generate_random_fastq(
     name_prefix = "multi2_"
 )
 multi_keys <- c(tempfile(fileext = ".mem"), tempfile(fileext = ".mem"))
-multi_keys <- normalizePath(multi_keys, winslash = "/", mustWork = FALSE)
 fraq_mem_load(multi_inputs, multi_keys, nthreads = 1L)
 mem_df4 <- fraq_mem_list()
 stopifnot(all(mapply(

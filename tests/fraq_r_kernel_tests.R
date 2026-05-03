@@ -1,22 +1,5 @@
 suppressPackageStartupMessages(library(fraq))
 
-write_fastq <- function(path, records) {
-    stopifnot(length(records) > 0L)
-    lines <- character(length(records) * 4L)
-    for (i in seq_along(records)) {
-        rec <- records[[i]]
-        idx <- (i - 1L) * 4L
-        lines[idx + 1L] <- paste0("@", rec$name)
-        lines[idx + 2L] <- rec$seq
-        lines[idx + 3L] <- "+"
-        lines[idx + 4L] <- rec$qual
-    }
-    con <- file(path, open = "wb")
-    on.exit(close(con), add = TRUE)
-    writeLines(lines, con = con, sep = "\n", useBytes = TRUE)
-    invisible(path)
-}
-
 read_fastq_records <- function(path) {
     if (!file.exists(path)) {
         return(list())
@@ -49,26 +32,20 @@ expect_error_message <- function(expr, pattern) {
     stopifnot(grepl(pattern, msg, fixed = TRUE))
 }
 
-make_records <- function(prefix, n) {
-    bases <- c("ACGT", "TGCA", "GATT", "CCGG", "TTAA", "GGCC", "AACC", "TTGG")
-    lapply(seq_len(n), function(i) {
-        seq <- paste0(bases[((i - 1L) %% length(bases)) + 1L], bases[((i + 2L) %% length(bases)) + 1L])
-        list(
-            name = paste0(prefix, i),
-            seq = seq,
-            qual = paste(rep.int(LETTERS[((i - 1L) %% 10L) + 9L], nchar(seq)), collapse = "")
-        )
-    })
-}
-
 extended <- identical(Sys.getenv("FRAQ_EXTENDED_TESTS"), "1")
 default_blocksize <- 65535L
 old_blocksize <- fraq_options("blocksize", 3L)
 on.exit(fraq_options("blocksize", old_blocksize), add = TRUE)
 
 cat("Testing fraq_run_r single-end identity kernel...\n")
-single_records <- make_records("r_", 8L)
-single_in <- write_fastq(tempfile(fileext = ".fastq"), single_records)
+single_in <- tempfile(fileext = ".fastq")
+generate_random_fastq(
+    single_in,
+    n_reads = 8L,
+    read_length = 50L,
+    name_prefix = "r_kernel_single_"
+)
+single_records <- read_fastq_records(single_in)
 single_out <- tempfile(fileext = ".fastq")
 seen_indices <- numeric()
 
@@ -112,12 +89,15 @@ fraq_run_r(
 stopifnot(!zero_called)
 
 cat("Testing fraq_run_r paired-end filtering and limit...\n")
-paired_r1 <- make_records("r1_", 7L)
-paired_r2 <- make_records("r2_", 7L)
-paired_in <- c(
-    write_fastq(tempfile(fileext = ".fastq"), paired_r1),
-    write_fastq(tempfile(fileext = ".fastq"), paired_r2)
+paired_in <- c(tempfile(fileext = ".fastq"), tempfile(fileext = ".fastq"))
+generate_random_fastq(
+    paired_in,
+    n_reads = 7L,
+    read_length = 50L,
+    name_prefix = "r_kernel_paired_"
 )
+paired_r1 <- read_fastq_records(paired_in[1])
+paired_r2 <- read_fastq_records(paired_in[2])
 paired_out <- c(tempfile(fileext = ".fastq"), tempfile(fileext = ".fastq"))
 
 fraq_run_r(
@@ -138,7 +118,7 @@ stopifnot(identical(read_fastq_records(paired_out[1]), paired_r1[expected_keep])
 stopifnot(identical(read_fastq_records(paired_out[2]), paired_r2[expected_keep]))
 
 cat("Testing fraq_run_r demultiplexing to multiple outputs...\n")
-demux_in <- write_fastq(tempfile(fileext = ".fastq"), single_records)
+demux_in <- single_in
 even_out <- tempfile(fileext = ".fastq")
 odd_out <- tempfile(fileext = ".fastq")
 even_out_from_kernel <- even_out

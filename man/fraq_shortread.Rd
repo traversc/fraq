@@ -28,8 +28,9 @@ written via FRAQ encoders.}
 \itemize{
 \item \code{fraq_export_shortreadq()} returns a single \code{ShortReadQ} when \code{input} has
 length 1, otherwise a list of \code{ShortReadQ} objects.
-\item \code{fraq_import_shortreadq()} invisibly returns the normalized \code{output}
-vector after conversion.
+\item \code{fraq_import_shortreadq()} invisibly returns \code{output} after conversion.
+Filesystem paths are normalized; \code{.mem} keys are returned exactly as
+supplied.
 }
 }
 \description{

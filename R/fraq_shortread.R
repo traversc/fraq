@@ -17,8 +17,9 @@
 #' @return
 #' * `fraq_export_shortreadq()` returns a single `ShortReadQ` when `input` has
 #'   length 1, otherwise a list of `ShortReadQ` objects.
-#' * `fraq_import_shortreadq()` invisibly returns the normalized `output`
-#'   vector after conversion.
+#' * `fraq_import_shortreadq()` invisibly returns `output` after conversion.
+#'   Filesystem paths are normalized; `.mem` keys are returned exactly as
+#'   supplied.
 #'
 #' @examples
 #' if (requireNamespace("ShortRead", quietly = TRUE)) {
@@ -58,7 +59,7 @@ fraq_export_shortreadq <- function(input, nthreads = 1L, tmpdir = tempdir()) {
     if (!length(input)) {
         stop("`input` must contain at least one path or key.")
     }
-    input <- normalizePath(input, winslash = "/", mustWork = FALSE)
+    input <- fraq_normalize_path_or_key(input)
     tmp_paths <- vapply(
         seq_along(input),
         function(i) {
@@ -71,6 +72,7 @@ fraq_export_shortreadq <- function(input, nthreads = 1L, tmpdir = tempdir()) {
         character(1),
         USE.NAMES = FALSE
     )
+    tmp_paths <- fraq_normalize_path_or_key(tmp_paths)
     fraq_convert(input, tmp_paths, nthreads = nthreads)
     results <- lapply(tmp_paths, ShortRead::readFastq)
     unlink(tmp_paths, recursive = FALSE, force = FALSE)
@@ -110,7 +112,7 @@ fraq_import_shortreadq <- function(
     if (length(sr_list) != length(output)) {
         stop("`shortreadq` and `output` must have the same length.")
     }
-    output <- normalizePath(output, winslash = "/", mustWork = FALSE)
+    output <- fraq_normalize_path_or_key(output)
     tmp_paths <- vapply(
         seq_along(sr_list),
         function(i) {
@@ -123,6 +125,7 @@ fraq_import_shortreadq <- function(
         character(1),
         USE.NAMES = FALSE
     )
+    tmp_paths <- fraq_normalize_path_or_key(tmp_paths)
     for (i in seq_along(sr_list)) {
         ShortRead::writeFastq(sr_list[[i]], tmp_paths[[i]], compress = FALSE)
     }
