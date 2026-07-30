@@ -1,3 +1,10 @@
+# fraq 1.1.2
+
+- Fix `.zst` outputs gaining a spurious trailing empty frame: `ZstdWriter`
+  now flushes with `ZSTD_flushStream` and only ends the frame in `close()`.
+- Close `.fraq`/`.mem` writers explicitly on the success path, so write
+  errors at close time are reported instead of silently discarded.
+
 # fraq 1.1.1
 
 - Move ShortRead from Imports to Suggests and check for it at runtime in

@@ -127,7 +127,7 @@ struct FastqConcatGraph {
   }
 
   void flush() {
-    writer.flush();
+    writer.close();
   }
 };
 
@@ -244,7 +244,7 @@ struct FraqConcatGraph {
   }
 
   void flush() {
-    writer->flush();
+    writer->close();
   }
 };
 

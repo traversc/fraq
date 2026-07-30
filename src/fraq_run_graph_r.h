@@ -343,6 +343,9 @@ struct FraqRunGraphR {
     for (auto& kv : fastq_writer_map) {
       kv.second->writer.close();
     }
+    for (auto& kv : fraqf_writer_map) {
+      kv.second->writer.close();
+    }
   }
 
   std::vector<size_t> check_reader_balance() const {
