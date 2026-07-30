@@ -1,8 +1,8 @@
 Package: fraq
 Type: Package
 Title: A High-Throughput and Extensible Toolkit for Processing FASTQ Data
-Version: 1.0.0
-Date: 2026-02-12
+Version: 1.0.1
+Date: 2026-07-29
 Authors@R: c(
     person("Travers", "Ching", email = "traversc@gmail.com", role = c("aut", "cre", "cph"),
         comment = c(ORCID = "0000-0002-5577-3516")),

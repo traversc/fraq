@@ -14,11 +14,11 @@
 #include <stdexcept>
 #include <sstream>
 #include <memory>
-#include <tbb/flow_graph.h>
 #include <tbb/concurrent_queue.h>
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/task_group.h>
 #include "io/fraq_readers.h"
+#include "io/tbb_flow_compat.h"
 #include "io/fraq_writers.h"
 #include "fraq_defines.h"
 
@@ -26,7 +26,6 @@ namespace fraq_internal {
 using namespace fraq;
 
 using tbb::flow::graph;
-using tbb::flow::source_node;
 using tbb::flow::function_node;
 using tbb::flow::sequencer_node;
 using tbb::flow::continue_msg;
@@ -377,6 +376,9 @@ struct FraqRunGraph {
     for (auto& kv : fastq_writer_map) {
       kv.second->writer.close();
     }
+    for (auto& kv : fraqf_writer_map) {
+      kv.second->writer.close();
+    }
   }
 
   std::vector<size_t> check_reader_balance() const {
@@ -595,7 +597,7 @@ struct FraqRunGraph {
     // Chain compression -> writing in single-threaded runs
     this->fraqf_compressor_node_body();
     // After demux work is scheduled/drained, return limiter token and request next
-    primary_limiter.decrement.try_put(continue_msg());
+    tbb_compat::decrementer(primary_limiter).try_put(continue_msg());
     primary_limiter.try_put(continue_msg());
     return continue_msg{};
   }

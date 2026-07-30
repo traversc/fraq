@@ -150,18 +150,57 @@ struct ZstdWriter : IWriter {
         write(&nl, 1);
     }
 
+    // Push buffered/compressed bytes to disk WITHOUT ending the zstd frame
+    // (ZSTD_e_flush, not ZSTD_e_end). Genuinely idempotent: calling it again
+    // with nothing new pending just returns immediately, so it's safe to
+    // call any number of times, including once from close() below.
     void flush() override {
+        if (!_cctx) return; // already closed
         if (_inPos > 0) {
             compressChunk(); // push remaining input
         }
+        drainStream(&ZSTD_flushStream);
+        std::fflush(_f);
+    }
 
-        // finish the frame
+    void close() override {
+        if (!_cctx && !_f) return;
+        // Release the context and file handle even if a stream step throws
+        // (e.g. the disk filled up mid-flush). Without this, a throwing
+        // close() would leave both allocated, and the destructor's retry
+        // would throw again and swallow it, leaking them for good.
+        struct Guard {
+            ZstdWriter* w;
+            ~Guard() {
+                if (w->_cctx) { ZSTD_freeCCtx(w->_cctx); w->_cctx = nullptr; }
+                if (w->_f)    { std::fclose(w->_f);      w->_f = nullptr; }
+            }
+        } guard{this};
+
+        flush();
+        // Actually end the frame. Runs exactly once: _cctx is nulled
+        // immediately after, and flush() and the guard above both bail
+        // out once it is null.
+        drainStream(&ZSTD_endStream);
+        ZSTD_freeCCtx(_cctx);
+        _cctx = nullptr;
+        FILE* f = _f;
+        _f = nullptr;
+        if (std::fclose(f) != 0) {
+            throw std::runtime_error("ZstdWriter: fclose failed");
+        }
+    }
+
+private:
+    // Drive one zstd streaming step (flush or end) to completion, writing
+    // out whatever compressed bytes it produces.
+    void drainStream(size_t (*step)(ZSTD_CStream*, ZSTD_outBuffer*)) {
         ZSTD_outBuffer out = { _outBuf.data(), _outBuf.size(), 0 };
         size_t ret;
         do {
-            ret = ZSTD_endStream(_cctx, &out);
+            ret = step(_cctx, &out);
             if (ZSTD_isError(ret)) {
-                throw std::runtime_error(std::string("ZSTD_endStream failed: ")
+                throw std::runtime_error(std::string("zstd stream step failed: ")
                                          + ZSTD_getErrorName(ret));
             }
             if (out.pos > 0) {
@@ -172,24 +211,8 @@ struct ZstdWriter : IWriter {
                 out.pos = 0;
             }
         } while (ret > 0);
-
-        std::fflush(_f);
     }
 
-    void close() override {
-        if (!_cctx && !_f) return;
-        flush();
-        if (_cctx) {
-            ZSTD_freeCCtx(_cctx);
-            _cctx = nullptr;
-        }
-        if (_f) {
-            std::fclose(_f);
-            _f = nullptr;
-        }
-    }
-
-private:
     void compressChunk() {
         ZSTD_inBuffer  in  = { _inBuf.data(), _inPos, 0 };
         ZSTD_outBuffer out = { _outBuf.data(), _outBuf.size(), 0 };
