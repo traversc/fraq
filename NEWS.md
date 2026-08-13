@@ -1,3 +1,9 @@
+# fraq 1.0.2
+
+- Fix `fraq_concat()` discarding output written to a `.fifo` path when the
+  reader is not keeping up. Buffered bytes are now drained before the writer
+  is closed, matching what `fraq_run()` already did.
+
 # fraq 1.0.1
 
 - Add TBB flow graph compatibility helpers so the package builds against
