@@ -1,3 +1,16 @@
+# fraq 1.1.3
+
+- Fix `fraq_concat()` discarding output written to a `.fifo` path when the
+  reader is not keeping up. Buffered bytes are now drained before the writer
+  is closed, matching what `fraq_run()` already did.
+- Fix a file descriptor leak when closing a `.fifo` writer failed.
+- Detect forked R processes with `RcppParallel::isProcessForkedChild()`
+  instead of probing `parallel::isChild()`, so the serial fallback triggers
+  regardless of which package performed the fork. This raises the minimum
+  RcppParallel version to 6.1.1.
+- `PlainWriter` and `FraqfFileWriter` now tolerate being closed twice, like
+  the gzip and zstd writers already did.
+
 # fraq 1.1.2
 
 - Fix `.zst` outputs gaining a spurious trailing empty frame: `ZstdWriter`
@@ -9,6 +22,10 @@
 
 - Move ShortRead from Imports to Suggests and check for it at runtime in
   ShortRead bridge helpers.
+- Add TBB flow graph compatibility helpers so the package builds against
+  both classic TBB and oneTBB (fixes a build failure caused by an
+  RcppParallel/TBB update that removed `tbb::flow::source_node` and made
+  `limiter_node::decrement` private).
 - Add `fraq_run_r()` for block-oriented R kernels that run on the main R
   thread while file I/O and compression can continue on `nthreads` TBB worker
   threads.

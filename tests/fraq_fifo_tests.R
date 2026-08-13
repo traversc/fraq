@@ -93,3 +93,40 @@ for (p in drains) {
 stopifnot(identical(unname(tools::md5sum(r1_sink)), unname(r1_hash)))
 stopifnot(identical(unname(tools::md5sum(r2_sink)), unname(r2_hash)))
 cat("FIFO streaming validated\n")
+
+# fraq_concat to a FIFO whose reader attaches late. The writer cannot open the
+# pipe until then, so everything is buffered in memory and only reaches the
+# reader if flush() drains before closing. The input is deliberately small and
+# independent of n_reads so that writing finishes well inside the reader's
+# delay; otherwise the reader attaches mid-write, drains as it goes, and
+# nothing is left pending at close.
+concat_delay <- 2L
+concat_src <- tempfile(fileext = ".fastq")
+generate_random_fastq(concat_src, 5000L, 60L, "fifo_concat_")
+concat_hash <- tools::md5sum(concat_src)
+
+concat_fifo <- tempfile(fileext = ".fastq.fifo")
+stopifnot(system2("mkfifo", concat_fifo) == 0L)
+on.exit(unlink(concat_fifo), add = TRUE)
+
+concat_sink <- tempfile(fileext = ".fastq")
+late_drain <- processx::process$new(
+    "sh",
+    c("-c", sprintf("sleep %d; exec cat %s", concat_delay, shQuote(concat_fifo))),
+    stdin = NULL,
+    stdout = concat_sink,
+    stderr = "|",
+    supervise = TRUE,
+    cleanup_tree = TRUE
+)
+on.exit(
+    if (late_drain$is_alive()) late_drain$kill_tree(),
+    add = TRUE,
+    after = FALSE
+)
+
+fraq_concat(concat_src, concat_fifo, nthreads = threads)
+late_drain$wait(timeout = 200000)
+stopifnot(late_drain$get_exit_status() == 0L)
+stopifnot(identical(unname(tools::md5sum(concat_sink)), unname(concat_hash)))
+cat("FIFO concat with a late reader validated\n")

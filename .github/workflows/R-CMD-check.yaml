@@ -15,7 +15,9 @@ name: R-CMD-check
 jobs:
   R-CMD-check:
     runs-on: ${{ matrix.config.os }}
-    timeout-minutes: 60
+    # 360 is the ceiling: GitHub-hosted runners kill any job at 6 hours, so
+    # there is no way to ask for longer.
+    timeout-minutes: 360
 
     name: ${{ matrix.config.os }} (${{ matrix.config.r }})
 
@@ -39,7 +41,9 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
-      FRAQ_EXTENDED_TESTS: true
+      # Must be exactly "1"; the tests compare against that literal, so the
+      # previous `true` silently ran the short suite.
+      FRAQ_EXTENDED_TESTS: '1'
 
     steps:
       - name: Windows CRLF fix

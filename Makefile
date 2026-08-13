@@ -83,3 +83,5 @@ test: $(BUILD)
 	FRAQ_EXTENDED_TESTS=1 Rscript tests/fraq_utils_tests.R
 	FRAQ_EXTENDED_TESTS=1 Rscript tests/fraq_r_kernel_tests.R
 	FRAQ_EXTENDED_TESTS=1 Rscript tests/fraq_serial_tests.R
+	FRAQ_EXTENDED_TESTS=1 Rscript tests/fraq_cpp_kernel_tests.R
+	FRAQ_EXTENDED_TESTS=1 Rscript tests/fraq_interrupt_tests.R

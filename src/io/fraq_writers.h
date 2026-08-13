@@ -264,7 +264,11 @@ struct PlainWriter : IWriter {
         if (!_ofs) throw std::runtime_error("flush failed");
     }
 
+    // Idempotent, like GzipWriter and ZstdWriter: std::ofstream sets failbit
+    // when closed twice, so re-entering would turn a clean second close into
+    // a spurious "flush failed".
     void close() override {
+        if (!_ofs.is_open()) return;
         flush();
         _ofs.close();
     }
@@ -291,6 +295,13 @@ struct FifoWriter : IWriter {
 
         // Best-effort open; if no reader is attached yet we will retry later.
         try_open_nonblocking();
+    }
+
+    // close() can throw (undelivered data, EPIPE), and callers legitimately
+    // swallow that. Without this the descriptor would never be released, so a
+    // session that hits the error path repeatedly runs out of descriptors.
+    ~FifoWriter() override {
+        close_fd();
     }
 
     void write(const char* data, size_t len) override {
@@ -370,6 +381,9 @@ struct FifoWriter : IWriter {
 
     void close() override {
         if (!pending.empty()) {
+            // Release the descriptor before reporting: the writer is done
+            // either way, and the caller may well discard this exception.
+            close_fd();
             throw std::runtime_error("Attempted to close FIFO writer with pending data");
         }
         close_fd();
@@ -506,6 +520,7 @@ struct FraqfFileWriter : IFraqfWriter {
         if (!ofs) throw std::runtime_error("FraqfFileWriter: flush failed");
     }
     void close() override {
+        if (!ofs.is_open()) return; // idempotent; a second close would set failbit
         ofs.close();
         if (!ofs) throw std::runtime_error("FraqfFileWriter: close failed");
     }

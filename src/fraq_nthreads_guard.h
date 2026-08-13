@@ -20,8 +20,11 @@ inline bool is_forked_child_internal() {
 
 #else
 
-static const pid_t fraq_load_pid_internal = getpid();
-static bool fraq_loaded_in_fork_child_state_internal = false;
+// inline, not static: static would give every translation unit including this
+// header its own copy, so a flag set through one TU would be invisible to the
+// inline readers compiled into another.
+inline const pid_t fraq_load_pid_internal = getpid();
+inline bool fraq_loaded_in_fork_child_state_internal = false;
 
 inline void loaded_in_fork_child_internal(bool loaded_in_fork_child) {
   fraq_loaded_in_fork_child_state_internal = loaded_in_fork_child;

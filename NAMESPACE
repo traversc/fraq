@@ -2,6 +2,7 @@ useDynLib(fraq, .registration = TRUE)
 
 importFrom(Rcpp, sourceCpp)
 importFrom(RcppParallel, RcppParallelLibs)
+importFrom(RcppParallel, isProcessForkedChild)
 importFrom(edlibR, align)
 importFrom(Biostrings, BStringSet)
 

@@ -127,6 +127,12 @@ struct FastqConcatGraph {
   }
 
   void flush() {
+    // FIFO writers buffer in memory instead of blocking when the pipe is full,
+    // so bytes can still be pending here. close() would discard them, so drain
+    // first, the same way FraqRunGraph::wait_and_flush() does.
+    while (writer.has_pending()) {
+      writer.flush();
+    }
     writer.close();
   }
 };
